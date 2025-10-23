@@ -1,9 +1,25 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart'
+    show PointerDeviceKind, PointerScrollEvent, PointerSignalEvent;
 import 'package:provider/provider.dart';
 import 'package:test_project/RoomFinderAppEditor.dart';
 
-enum PlaceType { room, passage, elevator }
+enum PlaceType { room, passage, elevator, entrance }
+
+extension PlaceTypeExtension on PlaceType {
+  bool get isGraphNode {
+    switch (this) {
+      case PlaceType.passage:
+      case PlaceType.elevator:
+      case PlaceType.entrance:
+        return true;
+      case PlaceType.room:
+      default:
+        return false;
+    }
+  }
+}
 
 class CachedSData {
   String id;
@@ -32,15 +48,55 @@ class Edge {
   Edge({required this.start, required this.end});
 }
 
+class ConditionalPageScrollPhysics extends PageScrollPhysics {
+  final bool Function() canScroll;
+
+  const ConditionalPageScrollPhysics({
+    required this.canScroll,
+    ScrollPhysics? parent,
+  }) : super(parent: parent);
+
+  @override
+  bool shouldAcceptUserOffset(ScrollMetrics position) =>
+      canScroll() && super.shouldAcceptUserOffset(position);
+
+  @override
+  double applyPhysicsToUserOffset(ScrollMetrics position, double offset) {
+    if (!canScroll()) return 0.0;
+    return super.applyPhysicsToUserOffset(position, offset);
+  }
+
+  @override
+  bool get allowImplicitScrolling =>
+      canScroll() && super.allowImplicitScrolling;
+
+  @override
+  ConditionalPageScrollPhysics applyTo(ScrollPhysics? ancestor) {
+    return ConditionalPageScrollPhysics(
+      canScroll: canScroll,
+      parent: super.applyTo(ancestor),
+    );
+  }
+}
+
 class BDataContainer extends ChangeNotifier {
   String buildingName = '';
-  Map<String, Offset>? _graphNodePositionCache;
+  int floorCount = 1;
+  String imageNamePattern = '';
+  Map<int, Map<String, Offset>> _graphNodePositionCacheByFloor = {};
   List<CachedSData> _cachedSDataList = [];
   List<CachedPData> _cachedPDataList = [];
+
   BDataContainer(
+    String initialBuildingName,
+    int initialFloorCount,
+    String initialImageNamePattern,
     List<CachedSData> initialSData,
     List<CachedPData> initialPData,
   ) {
+    buildingName = initialBuildingName;
+    floorCount = initialFloorCount;
+    imageNamePattern = initialImageNamePattern;
     _cachedSDataList.addAll(initialSData);
     _cachedPDataList.addAll(initialPData);
   }
@@ -48,19 +104,41 @@ class BDataContainer extends ChangeNotifier {
   List<CachedSData> get cachedSDataList => List.unmodifiable(_cachedSDataList);
   List<CachedPData> get cachedPDataList => List.unmodifiable(_cachedPDataList);
 
-  Map<String, Offset> get graphNodePositions {
-    _graphNodePositionCache ??= _buildGraphNodeCache();
-    return _graphNodePositionCache!;
+  void updateBuildingSettings({String? name, int? floors, String? pattern}) {
+    bool changed = false;
+
+    if (name != null && buildingName != name) {
+      buildingName = name;
+      changed = true;
+    }
+    if (floors != null && floorCount != floors) {
+      floorCount = floors;
+      changed = true;
+    }
+    if (pattern != null && imageNamePattern != pattern) {
+      imageNamePattern = pattern;
+      changed = true;
+    }
+
+    if (changed) {
+      notifyListeners();
+    }
   }
 
-  Map<String, Offset> _buildGraphNodeCache() {
+  Map<String, Offset> getGraphNodePositionsForFloor(int floor) {
+    if (!_graphNodePositionCacheByFloor.containsKey(floor)) {
+      _graphNodePositionCacheByFloor[floor] = _buildGraphNodeCacheForFloor(
+        floor,
+      );
+    }
+    return _graphNodePositionCacheByFloor[floor]!;
+  }
+
+  Map<String, Offset> _buildGraphNodeCacheForFloor(int floor) {
     return {
-      for (var sData
-          in _cachedSDataList..where(
-            (data) => (data.type == PlaceType.passage || 
-                    data.type == PlaceType.elevator) &&
-                data.floor == 1,
-          ))
+      for (var sData in _cachedSDataList.where(
+        (data) => data.type.isGraphNode && data.floor == floor,
+      ))
         sData.id: sData.position,
     };
   }
@@ -68,7 +146,7 @@ class BDataContainer extends ChangeNotifier {
   void addSData(CachedSData data) {
     _cachedSDataList.add(data);
     notifyListeners();
-    if (data.type == PlaceType.passage) _graphNodePositionCache = null;
+    if (data.type.isGraphNode) _graphNodePositionCacheByFloor.clear();
   }
 
   void addPData(CachedPData data) {
@@ -85,9 +163,8 @@ class BDataContainer extends ChangeNotifier {
       _cachedSDataList[index] = updatedData;
       notifyListeners();
 
-      if (updatedData.type == PlaceType.passage || 
-          updatedData.type == PlaceType.elevator) {
-        _graphNodePositionCache = null;
+      if (updatedData.type.isGraphNode) {
+        _graphNodePositionCacheByFloor.clear();
       }
     }
   }
@@ -95,9 +172,8 @@ class BDataContainer extends ChangeNotifier {
   void removeSData(CachedSData data) {
     _cachedSDataList.removeWhere((item) => item.id == data.id);
 
-    if (data.type == PlaceType.passage || 
-        data.type == PlaceType.elevator) {
-      _graphNodePositionCache = null;
+    if (data.type.isGraphNode) {
+      _graphNodePositionCacheByFloor.clear();
 
       if (_cachedPDataList.isNotEmpty) {
         final int edgesRemoved = _cachedPDataList[0].edges.length;
@@ -116,14 +192,14 @@ class BDataContainer extends ChangeNotifier {
   void addData(List<CachedSData> data) {
     _cachedSDataList.addAll(data);
     notifyListeners();
-    if (data.any((d) => d.type == PlaceType.passage))
-      _graphNodePositionCache = null;
+    if (data.any((d) => d.type.isGraphNode))
+      _graphNodePositionCacheByFloor.clear();
   }
 
   void clear() {
     _cachedSDataList.clear();
     notifyListeners();
-    _graphNodePositionCache = null;
+    _graphNodePositionCacheByFloor.clear();
   }
 
   void addEdge(String startId, String endId) {
@@ -161,7 +237,7 @@ class BDataContainer extends ChangeNotifier {
   }
 
   List<Edge> getGraphEdges({int floor = 1}) {
-    final positions = graphNodePositions;
+    final positions = getGraphNodePositionsForFloor(floor);
     final validEdges = <Edge>[];
     for (final edgeSet in _cachedPDataList.expand((pData) => pData.edges)) {
       if (edgeSet.length != 2) continue;
@@ -190,7 +266,23 @@ mixin InteractiveImageMixin<T extends StatefulWidget> on State<T> {
   CachedSData? connectingStart;
   Offset? previewPosition;
 
+  int _currentFloor = 1;
+  int get currentFloor => _currentFloor;
+  late PageController pageController;
+
   bool get showTapDot => false;
+
+  bool _isPointerSignalActive = false;
+
+  bool get _canSwipeFloors {
+    final scale = _transformationController.value.getMaxScaleOnAxis();
+    final canSwipeWhileConnectingElevator =
+        isConnecting && (connectingStart?.type == PlaceType.elevator);
+    return !_isPointerSignalActive &&
+        !isDragging &&
+        (!isConnecting || canSwipeWhileConnectingElevator) &&
+        scale <= 1.05;
+  }
 
   PlaceType currentType = PlaceType.room;
   final TransformationController _transformationController =
@@ -202,7 +294,35 @@ mixin InteractiveImageMixin<T extends StatefulWidget> on State<T> {
     PlaceType.room: Colors.blue,
     PlaceType.passage: Colors.green,
     PlaceType.elevator: Colors.purple,
+    PlaceType.entrance: Colors.teal,
   };
+
+  @override
+  void dispose() {
+    _transformationController.dispose();
+    pageController.dispose();
+    super.dispose();
+  }
+
+  void _handlePageChanged(int pageIndex) {
+    final bDataContainer = context.read<BDataContainer>();
+    setState(() {
+      _currentFloor = bDataContainer.floorCount - pageIndex;
+
+      tapPosition = null;
+      selectedElement = null;
+      isDragging = false;
+      //isConnecting = false;
+      //connectingStart = null;
+      //previewPosition = null;
+
+      if (this is EditorControllerHost) {
+        (this as EditorControllerHost).nameController.clear();
+        (this as EditorControllerHost).xController.clear();
+        (this as EditorControllerHost).yController.clear();
+      }
+    });
+  }
 
   void onTapDetected(Offset position) {
     setState(() {
@@ -211,207 +331,37 @@ mixin InteractiveImageMixin<T extends StatefulWidget> on State<T> {
   }
 
   Widget buildInteractiveImage() {
-    double pointerSize =
-        12 / sqrt(_transformationController.value.getMaxScaleOnAxis());
     return Expanded(
       child: Consumer<BDataContainer>(
         builder: (context, bDataContainer, child) {
-          final relevantElements = bDataContainer.cachedSDataList
-              .where((sData) => sData.floor == 1)
-              .toList();
-          final passageEdges = bDataContainer.getGraphEdges();
-
-          Edge? previewEdge;
-          if (isConnecting &&
-              connectingStart != null &&
-              previewPosition != null) {
-            previewEdge = Edge(
-              start: connectingStart!.position,
-              end: previewPosition!,
-            );
-          }
-
-          return Container(
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.black45, width: 1.0),
+          return ScrollConfiguration(
+            behavior: ScrollConfiguration.of(context).copyWith(
+              dragDevices: {
+                PointerDeviceKind.touch,
+                PointerDeviceKind.stylus,
+                PointerDeviceKind.mouse,
+              },
             ),
-            clipBehavior: Clip.hardEdge,
-            child: InteractiveViewer(
-              transformationController: _transformationController,
-              minScale: _minScale,
-              maxScale: _maxScale,
-              boundaryMargin: EdgeInsets.all(double.infinity),
-              onInteractionUpdate: (details) => setState(() {}),
+            child: PageView.builder(
+              controller: pageController,
+              scrollDirection: Axis.vertical,
+              physics: ConditionalPageScrollPhysics(canScroll: () => _canSwipeFloors),
+              itemCount: bDataContainer.floorCount,
+              onPageChanged: _handlePageChanged,
+              itemBuilder: (context, pageIndex) {
+                final int floor = bDataContainer.floorCount - pageIndex;
 
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  Image.asset(
-                    'assets/images/zenkou_1f.png',
-                    width: 280,
-                    filterQuality: FilterQuality.medium,
-                  ),
+                final double pointerSize =
+                    12 /
+                    sqrt(_transformationController.value.getMaxScaleOnAxis());
 
-                  Positioned.fill(
-                    child: Listener(
-                      onPointerMove: (details) {
-                        if (isConnecting) {
-                          setState(() {
-                            previewPosition = details.localPosition;
-                          });
-                        }
-                      },
-                      child: GestureDetector(
-                        onTapDown: (details) {
-                          onTapDetected(details.localPosition);
-                        },
-                        child: Container(color: Colors.transparent),
-                      ),
-                    ),
-                  ),
-
-                  ...relevantElements.asMap().entries.map((entry) {
-                    final index = entry.key;
-                    final sData = entry.value;
-                    final color = typeColors[sData.type] ?? Colors.grey;
-                    final isSelected = selectedElement == sData;
-
-                    return Positioned(
-                      left:
-                          sData.position.dx -
-                          (isSelected
-                              ? pointerSize / 8 * 10 / 2
-                              : pointerSize / 2),
-                      top:
-                          sData.position.dy -
-                          (isSelected
-                              ? pointerSize / 8 * 10 / 2
-                              : pointerSize / 2),
-                      child: GestureDetector(
-                        behavior: HitTestBehavior.translucent,
-                        onTap: () {
-                          if (isConnecting) {
-                            onTapDetected(sData.position);
-                          } else {
-                            final newSelected = isSelected ? null : sData;
-                            setState(() {
-                              selectedElement = newSelected;
-
-                              if (newSelected != null) {
-                                tapPosition = newSelected.position;
-                                (this as EditorControllerHost)
-                                        .nameController
-                                        .text =
-                                    newSelected.name;
-                                (this as EditorControllerHost)
-                                    .xController
-                                    .text = newSelected.position.dx
-                                    .toStringAsFixed(0);
-                                (this as EditorControllerHost)
-                                    .yController
-                                    .text = newSelected.position.dy
-                                    .toStringAsFixed(0);
-                              } else {
-                                tapPosition = null;
-                                (this as EditorControllerHost).nameController
-                                    .clear();
-                                (this as EditorControllerHost).xController
-                                    .clear();
-                                (this as EditorControllerHost).yController
-                                    .clear();
-                              }
-                            });
-                          }
-                        },
-                        onScaleStart: (details) {
-                          if (isSelected && !isConnecting) {
-                            isDragging = true;
-                          }
-                        },
-                        onScaleUpdate: (details) {
-                          if (isSelected && isDragging && !isConnecting) {
-                            if (details.scale != 1.0) return;
-
-                            final Offset sceneDelta = details.focalPointDelta;
-                            final Offset newPosition =
-                                selectedElement!.position + sceneDelta;
-
-                            (this as EditorControllerHost).xController.text =
-                                newPosition.dx.toStringAsFixed(0);
-                            (this as EditorControllerHost).yController.text =
-                                newPosition.dy.toStringAsFixed(0);
-
-                            final bDataContainer = context
-                                .read<BDataContainer>();
-                            final updatedData = CachedSData(
-                              id: selectedElement!.id,
-                              name: (this as EditorControllerHost)
-                                  .nameController
-                                  .text,
-                              position: newPosition,
-                              floor: selectedElement!.floor,
-                              type: selectedElement!.type,
-                            );
-                            bDataContainer.updateSData(updatedData);
-
-                            setState(() {
-                              selectedElement = updatedData;
-                              tapPosition = newPosition;
-                            });
-                          }
-                        },
-                        onScaleEnd: (details) {
-                          if (isSelected && isDragging) {
-                            isDragging = false;
-                          }
-                        },
-
-                        child: Container(
-                          width: isSelected
-                              ? pointerSize / 8 * 10
-                              : pointerSize,
-                          height: isSelected
-                              ? pointerSize / 8 * 10
-                              : pointerSize,
-                          decoration: BoxDecoration(
-                            color: isSelected ? Colors.orange : color,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                      ),
-                    );
-                  }).toList(),
-
-                  IgnorePointer(
-                    child: CustomPaint(
-                      size: Size.infinite,
-                      painter: PassagePainter(
-                        edges: passageEdges,
-                        previewEdge: previewEdge,
-                        controller: _transformationController,
-                        typeColors: typeColors,
-                        connectingType: connectingStart?.type,
-                      ),
-                    ),
-                  ),
-
-                  if (showTapDot &&
-                      tapPosition != null &&
-                      selectedElement == null)
-                    Positioned(
-                      left: tapPosition!.dx - pointerSize / 8 * 5 / 2,
-                      top: tapPosition!.dy - pointerSize / 8 * 5 / 2,
-                      child: Container(
-                        width: pointerSize / 8 * 5,
-                        height: pointerSize / 8 * 5,
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.7),
-                          shape: BoxShape.circle,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
+                return _buildFloorPage(
+                  context,
+                  bDataContainer,
+                  floor,
+                  pointerSize,
+                );
+              },
             ),
           );
         },
@@ -419,10 +369,220 @@ mixin InteractiveImageMixin<T extends StatefulWidget> on State<T> {
     );
   }
 
-  @override
-  void dispose() {
-    _transformationController.dispose();
-    super.dispose();
+  Widget _buildFloorPage(
+    BuildContext context,
+    BDataContainer bDataContainer,
+    int floor,
+    double pointerSize,
+  ) {
+    final relevantElements = bDataContainer.cachedSDataList
+        .where((sData) => sData.floor == floor)
+        .toList();
+    final passageEdges = bDataContainer.getGraphEdges(floor: floor);
+
+    Edge? previewEdge;
+    if (isConnecting &&
+        connectingStart != null &&
+        previewPosition != null &&
+        connectingStart!.floor == floor) {
+      previewEdge = Edge(
+        start: connectingStart!.position,
+        end: previewPosition!,
+      );
+    }
+
+    final String imagePath =
+        'assets/images/${bDataContainer.imageNamePattern}_${floor}f.png';
+
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.black45, width: 1.0),
+      ),
+      clipBehavior: Clip.hardEdge,
+      child: Listener(
+        onPointerSignal: _handlePointerSignal,
+      child: InteractiveViewer(
+        transformationController: _transformationController,
+        minScale: _minScale,
+        maxScale: _maxScale,
+        panEnabled: !_canSwipeFloors,
+        onInteractionUpdate: (details) => setState(() {}),
+        child: Container(
+          alignment: Alignment.center,
+          child: Stack(
+            children: [
+              Image.asset(
+                imagePath,
+                width: 280,
+                filterQuality: FilterQuality.medium,
+                errorBuilder: (context, error, stackTrace) {
+                  return Center(
+                    child: Text('$floor階の画像が見つかりません\n($imagePath)'),
+                  );
+                },
+              ),
+
+              Positioned.fill(
+                child: Listener(
+                  onPointerMove: (details) {
+                    if (isConnecting && connectingStart?.floor == floor) {
+                      setState(() {
+                        previewPosition = details.localPosition;
+                      });
+                    }
+                  },
+                  child: GestureDetector(
+                    onTapDown: (details) {
+                      onTapDetected(details.localPosition);
+                    },
+                    child: Container(color: Colors.transparent),
+                  ),
+                ),
+              ),
+
+              ...relevantElements.asMap().entries.map((entry) {
+                final index = entry.key;
+                final sData = entry.value;
+                final color = typeColors[sData.type] ?? Colors.grey;
+                final isSelected = selectedElement == sData;
+
+                return Positioned(
+                  left:
+                      sData.position.dx -
+                      (isSelected ? pointerSize / 8 * 10 / 2 : pointerSize / 2),
+                  top:
+                      sData.position.dy -
+                      (isSelected ? pointerSize / 8 * 10 / 2 : pointerSize / 2),
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onTap: () {
+                      if (isConnecting) {
+                        onTapDetected(sData.position);
+                      } else {
+                        final newSelected = isSelected ? null : sData;
+                        setState(() {
+                          selectedElement = newSelected;
+
+                          if (newSelected != null) {
+                            tapPosition = newSelected.position;
+                            (this as EditorControllerHost).nameController.text =
+                                newSelected.name;
+                            (this as EditorControllerHost).xController.text =
+                                newSelected.position.dx.toStringAsFixed(0);
+                            (this as EditorControllerHost).yController.text =
+                                newSelected.position.dy.toStringAsFixed(0);
+                          } else {
+                            tapPosition = null;
+                            (this as EditorControllerHost).nameController
+                                .clear();
+                            (this as EditorControllerHost).xController.clear();
+                            (this as EditorControllerHost).yController.clear();
+                          }
+                        });
+                      }
+                    },
+                    onScaleStart: (details) {
+                      if (isSelected && !isConnecting) {
+                        isDragging = true;
+                      }
+                    },
+                    onScaleUpdate: (details) {
+                      if (isSelected && isDragging && !isConnecting) {
+                        if (details.scale != 1.0) return;
+
+                        final Offset sceneDelta = details.focalPointDelta;
+                        final Offset newPosition =
+                            selectedElement!.position + sceneDelta;
+
+                        (this as EditorControllerHost).xController.text =
+                            newPosition.dx.toStringAsFixed(0);
+                        (this as EditorControllerHost).yController.text =
+                            newPosition.dy.toStringAsFixed(0);
+
+                        final bDataContainer = context.read<BDataContainer>();
+                        final updatedData = CachedSData(
+                          id: selectedElement!.id,
+                          name: (this as EditorControllerHost)
+                              .nameController
+                              .text,
+                          position: newPosition,
+                          floor: selectedElement!.floor,
+                          type: selectedElement!.type,
+                        );
+                        bDataContainer.updateSData(updatedData);
+
+                        setState(() {
+                          selectedElement = updatedData;
+                          tapPosition = newPosition;
+                        });
+                      }
+                    },
+                    onScaleEnd: (details) {
+                      if (isSelected && isDragging) {
+                        isDragging = false;
+                      }
+                    },
+                    child: Container(
+                      width: isSelected ? pointerSize / 8 * 10 : pointerSize,
+                      height: isSelected ? pointerSize / 8 * 10 : pointerSize,
+                      decoration: BoxDecoration(
+                        color: isSelected ? Colors.orange : color,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: CustomPaint(
+                    size: Size.infinite,
+                    painter: PassagePainter(
+                      edges: passageEdges,
+                      previewEdge: previewEdge,
+                      controller: _transformationController,
+                      typeColors: typeColors,
+                      connectingType: connectingStart?.type,
+                    ),
+                  ),
+                ),
+              ),
+
+              if (showTapDot && tapPosition != null && selectedElement == null)
+                Positioned(
+                  left: tapPosition!.dx - pointerSize / 8 * 5 / 2,
+                  top: tapPosition!.dy - pointerSize / 8 * 5 / 2,
+                  child: Container(
+                    width: pointerSize / 8 * 5,
+                    height: pointerSize / 8 * 5,
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.7),
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+      ),
+    );
+  }
+
+  void _handlePointerSignal(PointerSignalEvent event) {
+    if (event is PointerScrollEvent && mounted) {
+      if (!_isPointerSignalActive) {
+        setState(() {
+          _isPointerSignalActive = true;
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            setState(() => _isPointerSignalActive = false);
+          }
+        });
+      }
+    }
   }
 }
 

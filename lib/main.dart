@@ -7,7 +7,7 @@ import 'package:test_project/RoomFinderAppShared.dart';
 void main() {
   runApp(
     ChangeNotifierProvider(
-      create: (_) => BDataContainer(List.empty(), List.empty()),
+      create: (_) => BDataContainer('全学講義棟1号館', 2, 'zenkou', List.empty(), List.empty()),
       child: const MyApp(),
     ),
   );
@@ -53,7 +53,7 @@ class _RoomFinderState extends State<RoomFinder> {
       ),
       body: Center(
         child: Container(
-          width: 300,
+          width: 360,
           height: 600,
           color: Colors.grey[200],
           child: currentView,

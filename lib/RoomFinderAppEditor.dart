@@ -1,7 +1,149 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
 import 'package:test_project/RoomFinderAppShared.dart';
+
+class BuildingSettings {
+  final String buildingName;
+  final int floorCount;
+  final String imageNamePattern;
+
+  BuildingSettings({
+    required this.buildingName,
+    required this.floorCount,
+    required this.imageNamePattern,
+  });
+}
+
+class SettingsDialog extends StatefulWidget {
+  final String initialBuildingName;
+  final int initialFloorCount;
+  final String initialImagePattern;
+
+  const SettingsDialog({
+    super.key,
+    required this.initialBuildingName,
+    required this.initialFloorCount,
+    required this.initialImagePattern,
+  });
+
+  @override
+  State<SettingsDialog> createState() => _SettingsDialogState();
+}
+
+class _SettingsDialogState extends State<SettingsDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _nameController;
+  late final TextEditingController _floorCountController;
+  late final TextEditingController _imagePatternController;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.initialBuildingName);
+    _floorCountController = TextEditingController(
+      text: widget.initialFloorCount.toString(),
+    );
+    _imagePatternController = TextEditingController(
+      text: widget.initialImagePattern,
+    );
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _floorCountController.dispose();
+    _imagePatternController.dispose();
+    super.dispose();
+  }
+
+  void _saveSettings() {
+    if (_formKey.currentState!.validate()) {
+      final settings = BuildingSettings(
+        buildingName: _nameController.text.trim(),
+        floorCount: int.parse(_floorCountController.text),
+        imageNamePattern: _imagePatternController.text.trim(),
+      );
+      Navigator.pop(context, settings);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('建物設定'),
+      content: SingleChildScrollView(
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: _nameController,
+                decoration: const InputDecoration(
+                  labelText: '建物名',
+                  hintText: '例: 全学講義棟1号館',
+                ),
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return '建物名を入力してください';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _floorCountController,
+                decoration: const InputDecoration(labelText: '階層数'),
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return '階層数を入力してください';
+                  }
+                  final int? count = int.tryParse(value);
+                  if (count == null || count <= 0) {
+                    return '1以上の数値を入力してください';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _imagePatternController,
+                decoration: const InputDecoration(
+                  labelText: '画像ファイルの識別名',
+                  helperText:
+                      '例: "my_building"\n→ "my_building_1f.png", "my_building_2f.png"...',
+                  helperMaxLines: 3,
+                ),
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return '識別名を入力してください';
+                  }
+                  if (value.contains(RegExp(r'[\s_]'))) {
+                    return 'スペースやアンダースコア(_)は含めないでください';
+                  }
+                  return null;
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          child: const Text('キャンセル'),
+          onPressed: () {
+            Navigator.pop(context);
+          },
+        ),
+        ElevatedButton(child: const Text('保存'), onPressed: _saveSettings),
+      ],
+    );
+  }
+}
 
 abstract class EditorControllerHost {
   TextEditingController get nameController;
@@ -22,15 +164,9 @@ class _EditorViewState extends State<EditorView>
   @override
   bool get showTapDot => true;
 
-  PlaceType currentType = PlaceType.room;
-
-  final TransformationController _transformationController =
-      TransformationController();
-
   final _nameController = TextEditingController();
   final _xController = TextEditingController();
   final _yController = TextEditingController();
-  var test = _EditorViewState;
 
   @override
   TextEditingController get nameController => _nameController;
@@ -44,6 +180,11 @@ class _EditorViewState extends State<EditorView>
   @override
   void initState() {
     super.initState();
+    final bDataContainer = context.read<BDataContainer>();
+    pageController = PageController(
+      initialPage: bDataContainer.floorCount - currentFloor,
+    );
+
     _xController.addListener(_updateTapPositionFromTextFields);
     _yController.addListener(_updateTapPositionFromTextFields);
     _nameController.addListener(_updateNameFromTextField);
@@ -58,7 +199,7 @@ class _EditorViewState extends State<EditorView>
     _nameController.dispose();
     _xController.dispose();
     _yController.dispose();
-    _transformationController.dispose();
+
     super.dispose();
   }
 
@@ -111,14 +252,25 @@ class _EditorViewState extends State<EditorView>
       final tappedElement = _findElementAtPosition(
         position,
         context.read<BDataContainer>(),
+        currentFloor,
       );
-      if (tappedElement != null &&
-          (tappedElement.type == PlaceType.passage || 
-              tappedElement.type == PlaceType.elevator) &&
-          tappedElement.id != connectingStart?.id) {
+
+      bool canConnect = false;
+      if (tappedElement != null && tappedElement.id != connectingStart?.id) {
+        if (connectingStart?.type == PlaceType.elevator) {
+          canConnect = tappedElement.type == PlaceType.elevator;
+        } else {
+          canConnect = tappedElement.type.isGraphNode &&
+              tappedElement.floor == connectingStart?.floor;
+        }
+      }
+
+      if (canConnect) {
         final bDataContainer = context.read<BDataContainer>();
-        bDataContainer.addEdge(connectingStart!.id, tappedElement.id);
+        bDataContainer.addEdge(connectingStart!.id, tappedElement!.id);
         setState(() {
+          isConnecting = false;
+          connectingStart = null;
           previewPosition = null;
           tapPosition = null;
         });
@@ -157,9 +309,10 @@ class _EditorViewState extends State<EditorView>
   CachedSData? _findElementAtPosition(
     Offset position,
     BDataContainer bDataContainer,
+    int floor,
   ) {
     final relevantElements = bDataContainer.cachedSDataList
-        .where((sData) => sData.floor == 1)
+        .where((sData) => sData.floor == floor)
         .toList();
     for (final element in relevantElements) {
       final distance = (position - element.position).distance;
@@ -177,8 +330,7 @@ class _EditorViewState extends State<EditorView>
         connectingStart = null;
         previewPosition = null;
       });
-    } else if (selectedElement?.type == PlaceType.passage ||
-        selectedElement!.type == PlaceType.elevator) {
+    } else if (selectedElement != null && selectedElement!.type.isGraphNode) {
       setState(() {
         isConnecting = true;
         connectingStart = selectedElement;
@@ -192,26 +344,59 @@ class _EditorViewState extends State<EditorView>
     }
   }
 
+  void _openSettingsDialog() async {
+    final bDataContainer = context.read<BDataContainer>();
+
+    final BuildingSettings? newSettings = await showDialog<BuildingSettings>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) {
+        return SettingsDialog(
+          initialBuildingName: bDataContainer.buildingName,
+          initialFloorCount: bDataContainer.floorCount,
+          initialImagePattern: bDataContainer.imageNamePattern,
+        );
+      },
+    );
+
+    if (newSettings != null && mounted) {
+      bDataContainer.updateBuildingSettings(
+        name: newSettings.buildingName,
+        floors: newSettings.floorCount,
+        pattern: newSettings.imageNamePattern,
+      );
+
+      if (currentFloor > newSettings.floorCount) {
+        pageController.jumpToPage(newSettings.floorCount - 1);
+      } else {
+        setState(() {});
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final bDataContainer = context.read<BDataContainer>();
+
     String displaySText = '';
     displaySText +=
         '{\n'
-        ' "building_name": "${bDataContainer.buildingName}"\n'
-        ' "floors": [1, 2, 3],\n'
+        ' "building_name": "${bDataContainer.buildingName}",\n'
+        ' "floor_count": ${bDataContainer.floorCount},\n'
+        ' "image_pattern": "${bDataContainer.imageNamePattern}",\n'
         ' "elements": [\n';
+
     for (int i = 0; i < bDataContainer.cachedSDataList.length; i++) {
       displaySText +=
-          '   {\n'
-          '     "id": "${bDataContainer.cachedSDataList[i].id}",\n'
-          '     "name": "${bDataContainer.cachedSDataList[i].name}",\n'
-          '     "position": { "x": ${bDataContainer.cachedSDataList[i].position.dx.round()}, "y": ${bDataContainer.cachedSDataList[i].position.dy.round()} },\n'
-          '     "floor": ${bDataContainer.cachedSDataList[i].floor},\n'
-          '     "type": "${bDataContainer.cachedSDataList[i].type.name}"\n';
+          '  {\n'
+          '   "id": "${bDataContainer.cachedSDataList[i].id}",\n'
+          '   "name": "${bDataContainer.cachedSDataList[i].name}",\n'
+          '   "position": { "x": ${bDataContainer.cachedSDataList[i].position.dx.round()}, "y": ${bDataContainer.cachedSDataList[i].position.dy.round()} },\n'
+          '   "floor": ${bDataContainer.cachedSDataList[i].floor},\n'
+          '   "type": "${bDataContainer.cachedSDataList[i].type.name}"\n';
       displaySText += i == bDataContainer.cachedSDataList.length - 1
-          ? '   }\n'
-          : '   },\n';
+          ? '  }\n'
+          : '  },\n';
     }
     displaySText +=
         ' ],\n'
@@ -223,7 +408,7 @@ class _EditorViewState extends State<EditorView>
       final edgeSet = allEdges[i];
       if (edgeSet.length == 2) {
         final ids = edgeSet.toList();
-        displaySText += '   ["${ids[0]}", "${ids[1]}"]';
+        displaySText += '  ["${ids[0]}", "${ids[1]}"]';
         displaySText += i == allEdges.length - 1 ? '\n' : ',\n';
       }
     }
@@ -240,14 +425,19 @@ class _EditorViewState extends State<EditorView>
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: <Widget>[
+                Text(
+                  '$currentFloor階',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                ),
+                const VerticalDivider(thickness: 1, indent: 8, endIndent: 8),
+
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: currentType == PlaceType.room
                         ? typeColors[PlaceType.room]
                         : null,
                     foregroundColor: currentType == PlaceType.room
-                        ? Colors
-                              .white
+                        ? Colors.white
                         : null,
                   ),
                   child: const Text('部屋'),
@@ -284,10 +474,27 @@ class _EditorViewState extends State<EditorView>
                         ? Colors.white
                         : null,
                   ),
-                  child: const Text('階段など'),
+                  child: const Text('階段'),
                   onPressed: () {
                     setState(() {
                       currentType = PlaceType.elevator;
+                    });
+                  },
+                ),
+                const SizedBox(width: 4),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: currentType == PlaceType.entrance
+                        ? typeColors[PlaceType.entrance]
+                        : null,
+                    foregroundColor: currentType == PlaceType.entrance
+                        ? Colors.white
+                        : null,
+                  ),
+                  child: const Text('入口'),
+                  onPressed: () {
+                    setState(() {
+                      currentType = PlaceType.entrance;
                     });
                   },
                 ),
@@ -350,9 +557,9 @@ class _EditorViewState extends State<EditorView>
                       ),
                       const SizedBox(height: 8),
                     ] else ...[
-                      const Text(
-                        '接続モード: 別の廊下をタップして接続',
-                        style: TextStyle(
+                      Text(
+                        '接続モード: 接続先のノードをタップ',
+                        style: const TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
                         ),
@@ -388,7 +595,7 @@ class _EditorViewState extends State<EditorView>
                                     id: const Uuid().v4(),
                                     name: name,
                                     position: Offset(x, y),
-                                    floor: 1,
+                                    floor: currentFloor,
                                     type: currentType,
                                   );
                                   bDataContainer.addSData(newSData);
@@ -402,7 +609,6 @@ class _EditorViewState extends State<EditorView>
                                 },
                               ),
                             ),
-
                           if (selectedElement != null) ...[
                             Expanded(
                               child: ElevatedButton(
@@ -413,17 +619,14 @@ class _EditorViewState extends State<EditorView>
                                   '削除する!',
                                   style: TextStyle(color: Colors.white),
                                 ),
-
                                 onPressed: () async {
                                   final bDataContainer = context
                                       .read<BDataContainer>();
-                                  final elementToDelete =
-                                      selectedElement!;
+                                  final elementToDelete = selectedElement!;
 
                                   bool shouldDelete = true;
 
-                                  if ((elementToDelete.type == PlaceType.passage ||
-                                          elementToDelete.type == PlaceType.elevator) &&
+                                  if (elementToDelete.type.isGraphNode &&
                                       bDataContainer.hasEdges(
                                         elementToDelete.id,
                                       )) {
@@ -483,8 +686,7 @@ class _EditorViewState extends State<EditorView>
                                 },
                               ),
                             ),
-                            if (selectedElement!.type == PlaceType.passage ||
-                                selectedElement!.type == PlaceType.elevator) ...[
+                            if (selectedElement!.type.isGraphNode) ...[
                               const SizedBox(width: 8),
                               Expanded(
                                 child: ElevatedButton(
@@ -494,7 +696,6 @@ class _EditorViewState extends State<EditorView>
                               ),
                             ],
                           ],
-
                           if (isConnecting)
                             Expanded(
                               child: ElevatedButton(
@@ -512,29 +713,46 @@ class _EditorViewState extends State<EditorView>
           else
             SizedBox(
               height: 78,
-              child: const Text(
-                '画像をタップして座標を取得',
-                style: TextStyle(fontSize: 10),
+              child: Text(
+                '画像をタップして座標を取得\n上下スワイプで階層移動',
+                style: const TextStyle(fontSize: 10),
+                textAlign: TextAlign.center,
               ),
             ),
           const SizedBox(height: 4),
           Container(height: 2, color: Colors.grey[300]),
           const SizedBox(height: 4),
-
           LayoutBuilder(
             builder: (context, constraints) {
               return SizedBox(
                 width: constraints.maxWidth - 16,
                 height: 120,
-                child: SingleChildScrollView(
-                  child: SelectableText(
-                    displaySText,
-                    textAlign: TextAlign.left,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
+                child: Stack(
+                  children: [
+                    SizedBox(
+                      width: double.infinity,
+                      height: double.infinity,
+                      child: SingleChildScrollView(
+                        child: SelectableText(
+                          displaySText,
+                          textAlign: TextAlign.left,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontFamily: 'monospace',
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
+                    Positioned(
+                      top: 0,
+                      right: 8,
+                      child: IconButton(
+                        icon: const Icon(Icons.settings),
+                        onPressed: _openSettingsDialog,
+                      ),
+                    ),
+                  ],
                 ),
               );
             },
