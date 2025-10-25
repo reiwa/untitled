@@ -152,7 +152,7 @@ abstract class EditorControllerHost {
 }
 
 class EditorView extends CustomView {
-  const EditorView({super.key});
+  const EditorView({super.key}) : super(mode: CustomViewMode.editor);
 
   @override
   State<EditorView> createState() => _EditorViewState();
@@ -161,9 +161,6 @@ class EditorView extends CustomView {
 class _EditorViewState extends State<EditorView>
     with InteractiveImageMixin<EditorView>
     implements EditorControllerHost {
-  @override
-  bool get showTapDot => true;
-
   final _nameController = TextEditingController();
   final _xController = TextEditingController();
   final _yController = TextEditingController();
@@ -177,6 +174,16 @@ class _EditorViewState extends State<EditorView>
   @override
   TextEditingController get yController => _yController;
 
+  void _updatePhysicsOnZoomChange() {
+    final bool canSwipeNow = canSwipeFloors;
+
+    if (isPageScrollable != canSwipeNow) {
+      setState(() {
+        isPageScrollable = canSwipeNow;
+      });
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -188,6 +195,9 @@ class _EditorViewState extends State<EditorView>
     _xController.addListener(_updateTapPositionFromTextFields);
     _yController.addListener(_updateTapPositionFromTextFields);
     _nameController.addListener(_updateNameFromTextField);
+
+    isPageScrollable = canSwipeFloors;
+    transformationController.addListener(_updatePhysicsOnZoomChange);
   }
 
   @override
@@ -195,6 +205,8 @@ class _EditorViewState extends State<EditorView>
     _xController.removeListener(_updateTapPositionFromTextFields);
     _yController.removeListener(_updateTapPositionFromTextFields);
     _nameController.removeListener(_updateNameFromTextField);
+
+    transformationController.removeListener(_updatePhysicsOnZoomChange);
 
     _nameController.dispose();
     _xController.dispose();
@@ -204,46 +216,52 @@ class _EditorViewState extends State<EditorView>
   }
 
   void _updateNameFromTextField() {
-    if (isDragging) return;
+    if (isDragging || selectedElement == null) return;
 
-    if (selectedElement != null) {
-      final bDataContainer = context.read<BDataContainer>();
-      final updatedData = CachedSData(
-        id: selectedElement!.id,
-        name: _nameController.text,
-        position: selectedElement!.position,
-        floor: selectedElement!.floor,
-        type: selectedElement!.type,
-      );
-      bDataContainer.updateSData(updatedData);
-      setState(() {
-        selectedElement = updatedData;
-      });
-    }
+    final trimmedName = _nameController.text.trim();
+    if (trimmedName == selectedElement!.name) return;
+
+    final bDataContainer = context.read<BDataContainer>();
+    final updatedData = selectedElement!.copyWith(name: trimmedName);
+    bDataContainer.updateSData(updatedData);
+    setState(() => selectedElement = updatedData);
   }
 
   void _updateTapPositionFromTextFields() {
-    if (isDragging) return;
+    if (isDragging || selectedElement == null) return;
 
     final double? x = double.tryParse(_xController.text);
     final double? y = double.tryParse(_yController.text);
+    if (x == null || y == null) return;
 
-    if (x != null && y != null && selectedElement != null) {
-      final newPosition = Offset(x, y);
-      final bDataContainer = context.read<BDataContainer>();
-      final updatedData = CachedSData(
-        id: selectedElement!.id,
-        name: selectedElement!.name,
-        position: newPosition,
-        floor: selectedElement!.floor,
-        type: selectedElement!.type,
-      );
-      bDataContainer.updateSData(updatedData);
-      setState(() {
-        tapPosition = newPosition;
-        selectedElement = updatedData;
-      });
-    }
+    final newPosition = Offset(x, y);
+    if (selectedElement!.position == newPosition) return;
+
+    final bDataContainer = context.read<BDataContainer>();
+    final updatedData = selectedElement!.copyWith(position: newPosition);
+    bDataContainer.updateSData(updatedData);
+    setState(() {
+      tapPosition = newPosition;
+      selectedElement = updatedData;
+    });
+  }
+
+  Widget _buildTypeSelector() {
+    return Wrap(
+      alignment: WrapAlignment.center,
+      spacing: 4,
+      children: PlaceType.values.map((type) {
+        final isSelected = currentType == type;
+        return ElevatedButton(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: isSelected ? type.color : null,
+            foregroundColor: isSelected ? Colors.white : null,
+          ),
+          onPressed: () => setState(() => currentType = type),
+          child: Text(type.label),
+        );
+      }).toList(),
+    );
   }
 
   @override
@@ -256,12 +274,31 @@ class _EditorViewState extends State<EditorView>
       );
 
       bool canConnect = false;
-      if (tappedElement != null && tappedElement.id != connectingStart?.id) {
-        if (connectingStart?.type == PlaceType.elevator) {
-          canConnect = tappedElement.type == PlaceType.elevator;
+      final start = connectingStart;
+      if (tappedElement == null || start == null || tappedElement.id == start.id) {
+        canConnect = false;
+      } else {
+        final sameFloor = tappedElement.floor == start.floor;
+        final startType = start.type;
+        final tappedType = tappedElement.type;
+
+        if (!sameFloor) {
+          canConnect =
+              (startType == PlaceType.elevator &&
+              tappedType == PlaceType.elevator);
         } else {
-          canConnect = tappedElement.type.isGraphNode &&
-              tappedElement.floor == connectingStart?.floor;
+          final bool tappedIsConnectable = tappedType.isGraphNode;
+
+          final bool startIsSpecial =
+              (startType == PlaceType.elevator ||
+              startType == PlaceType.entrance);
+          final bool tappedIsSpecial =
+              (tappedType == PlaceType.elevator ||
+              tappedType == PlaceType.entrance);
+
+          final bool isProhibitedConnection = startIsSpecial && tappedIsSpecial;
+
+          canConnect = tappedIsConnectable && !isProhibitedConnection;
         }
       }
 
@@ -377,44 +414,7 @@ class _EditorViewState extends State<EditorView>
   @override
   Widget build(BuildContext context) {
     final bDataContainer = context.read<BDataContainer>();
-
-    String displaySText = '';
-    displaySText +=
-        '{\n'
-        ' "building_name": "${bDataContainer.buildingName}",\n'
-        ' "floor_count": ${bDataContainer.floorCount},\n'
-        ' "image_pattern": "${bDataContainer.imageNamePattern}",\n'
-        ' "elements": [\n';
-
-    for (int i = 0; i < bDataContainer.cachedSDataList.length; i++) {
-      displaySText +=
-          '  {\n'
-          '   "id": "${bDataContainer.cachedSDataList[i].id}",\n'
-          '   "name": "${bDataContainer.cachedSDataList[i].name}",\n'
-          '   "position": { "x": ${bDataContainer.cachedSDataList[i].position.dx.round()}, "y": ${bDataContainer.cachedSDataList[i].position.dy.round()} },\n'
-          '   "floor": ${bDataContainer.cachedSDataList[i].floor},\n'
-          '   "type": "${bDataContainer.cachedSDataList[i].type.name}"\n';
-      displaySText += i == bDataContainer.cachedSDataList.length - 1
-          ? '  }\n'
-          : '  },\n';
-    }
-    displaySText +=
-        ' ],\n'
-        ' "edges": [\n';
-    final allEdges = bDataContainer.cachedPDataList
-        .expand((pData) => pData.edges)
-        .toList();
-    for (int i = 0; i < allEdges.length; i++) {
-      final edgeSet = allEdges[i];
-      if (edgeSet.length == 2) {
-        final ids = edgeSet.toList();
-        displaySText += '  ["${ids[0]}", "${ids[1]}"]';
-        displaySText += i == allEdges.length - 1 ? '\n' : ',\n';
-      }
-    }
-    displaySText +=
-        ' ]\n'
-        '}';
+    final displaySText = bDataContainer.buildSnapshot();
 
     return Container(
       child: Column(
@@ -430,74 +430,7 @@ class _EditorViewState extends State<EditorView>
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                 ),
                 const VerticalDivider(thickness: 1, indent: 8, endIndent: 8),
-
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: currentType == PlaceType.room
-                        ? typeColors[PlaceType.room]
-                        : null,
-                    foregroundColor: currentType == PlaceType.room
-                        ? Colors.white
-                        : null,
-                  ),
-                  child: const Text('部屋'),
-                  onPressed: () {
-                    setState(() {
-                      currentType = PlaceType.room;
-                    });
-                  },
-                ),
-                const SizedBox(width: 4),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: currentType == PlaceType.passage
-                        ? typeColors[PlaceType.passage]
-                        : null,
-                    foregroundColor: currentType == PlaceType.passage
-                        ? Colors.white
-                        : null,
-                  ),
-                  child: const Text('廊下'),
-                  onPressed: () {
-                    setState(() {
-                      currentType = PlaceType.passage;
-                    });
-                  },
-                ),
-                const SizedBox(width: 4),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: currentType == PlaceType.elevator
-                        ? typeColors[PlaceType.elevator]
-                        : null,
-                    foregroundColor: currentType == PlaceType.elevator
-                        ? Colors.white
-                        : null,
-                  ),
-                  child: const Text('階段'),
-                  onPressed: () {
-                    setState(() {
-                      currentType = PlaceType.elevator;
-                    });
-                  },
-                ),
-                const SizedBox(width: 4),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: currentType == PlaceType.entrance
-                        ? typeColors[PlaceType.entrance]
-                        : null,
-                    foregroundColor: currentType == PlaceType.entrance
-                        ? Colors.white
-                        : null,
-                  ),
-                  child: const Text('入口'),
-                  onPressed: () {
-                    setState(() {
-                      currentType = PlaceType.entrance;
-                    });
-                  },
-                ),
+                Expanded(child: _buildTypeSelector()),
               ],
             ),
           ),
@@ -578,7 +511,7 @@ class _EditorViewState extends State<EditorView>
                                   final bDataContainer = context
                                       .read<BDataContainer>();
 
-                                  final String name = _nameController.text;
+                                  final String name = _nameController.text.trim();
                                   final double? x = double.tryParse(
                                     _xController.text,
                                   );
