@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:uuid/uuid.dart';
-import 'package:test_project/RoomFinderAppShared.dart';
+import 'package:test_project/RoomFinderModels.dart';
+import 'package:test_project/RoomFinderWidgets.dart';
 
 class BuildingSettings {
   final String buildingName;
@@ -184,13 +185,19 @@ class _EditorViewState extends State<EditorView>
     }
   }
 
+  void _prepareEditorDraft(BDataContainer container) {
+    container.ensureDraftReadyForEditor();
+  }
+
   @override
   void initState() {
     super.initState();
     final bDataContainer = context.read<BDataContainer>();
+    _prepareEditorDraft(bDataContainer);
     pageController = PageController(
       initialPage: bDataContainer.floorCount - currentFloor,
     );
+    activeBuildingId = bDataContainer.activeBuildingId;
 
     _xController.addListener(_updateTapPositionFromTextFields);
     _yController.addListener(_updateTapPositionFromTextFields);
@@ -275,7 +282,9 @@ class _EditorViewState extends State<EditorView>
 
       bool canConnect = false;
       final start = connectingStart;
-      if (tappedElement == null || start == null || tappedElement.id == start.id) {
+      if (tappedElement == null ||
+          start == null ||
+          tappedElement.id == start.id) {
         canConnect = false;
       } else {
         final sameFloor = tappedElement.floor == start.floor;
@@ -333,7 +342,14 @@ class _EditorViewState extends State<EditorView>
     }
 
     setState(() {
-      tapPosition = position;
+      if (tapPosition == position) {
+        tapPosition = null;
+        _nameController.clear();
+        _xController.clear();
+        _yController.clear();
+      } else {
+        tapPosition = position;
+      }
     });
 
     if (selectedElement == null) {
@@ -409,6 +425,10 @@ class _EditorViewState extends State<EditorView>
         setState(() {});
       }
     }
+  }
+
+  void _rebuildRoomPassageEdges() {
+    context.read<BDataContainer>().rebuildRoomPassageEdges();
   }
 
   @override
@@ -511,7 +531,8 @@ class _EditorViewState extends State<EditorView>
                                   final bDataContainer = context
                                       .read<BDataContainer>();
 
-                                  final String name = _nameController.text.trim();
+                                  final String name = _nameController.text
+                                      .trim();
                                   final double? x = double.tryParse(
                                     _xController.text,
                                   );
@@ -646,10 +667,26 @@ class _EditorViewState extends State<EditorView>
           else
             SizedBox(
               height: 78,
-              child: Text(
-                '画像をタップして座標を取得\n上下スワイプで階層移動',
-                style: const TextStyle(fontSize: 10),
-                textAlign: TextAlign.center,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    '画像をタップして座標を取得\n上下スワイプで階層移動',
+                    style: const TextStyle(fontSize: 10),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 8),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _rebuildRoomPassageEdges,
+                        child: const Text('部屋と廊下を接続'),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           const SizedBox(height: 4),
@@ -680,9 +717,28 @@ class _EditorViewState extends State<EditorView>
                     Positioned(
                       top: 0,
                       right: 8,
-                      child: IconButton(
-                        icon: const Icon(Icons.settings),
-                        onPressed: _openSettingsDialog,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.settings),
+                            onPressed: _openSettingsDialog,
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.copy),
+                            tooltip: 'コピー',
+                            onPressed: () async {
+                              await Clipboard.setData(
+                                ClipboardData(text: displaySText),
+                              );
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('コピーしました')),
+                                );
+                              }
+                            },
+                          ),
+                        ],
                       ),
                     ),
                   ],

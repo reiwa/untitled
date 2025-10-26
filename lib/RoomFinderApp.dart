@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:test_project/RoomFinderAppShared.dart';
+import 'package:test_project/RoomFinderModels.dart';
+import 'package:test_project/RoomFinderWidgets.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'dart:math';
 
@@ -78,7 +79,9 @@ class Pathfinder {
       return [];
     }
 
-    final aStarTargetNode = _findClosestGraphNode(allGraphNodes, targetRoom);
+    final CachedSData aStarTargetNode = targetRoom.type.isGraphNode
+        ? targetRoom
+        : _findClosestGraphNode(allGraphNodes, targetRoom);
 
     final openSet = <_AStarNode>[];
     final closedSet = <String>{};
@@ -138,14 +141,20 @@ class Pathfinder {
     final pathNodes = <CachedSData>[];
     String current = currentId;
 
-    while (cameFrom.containsKey(current)) {
-      pathNodes.add(nodeMap[current]!);
-      current = cameFrom[current]!;
+    while (true) {
+      final node = nodeMap[current];
+      if (node != null) {
+        pathNodes.add(node);
+      }
+      final next = cameFrom[current];
+      if (next == null) break;
+      current = next;
     }
-    pathNodes.add(nodeMap[current]!);
 
     final orderedPath = pathNodes.reversed.toList();
-    orderedPath.add(targetRoom);
+    if (orderedPath.isEmpty || orderedPath.last.id != targetRoom.id) {
+      orderedPath.add(targetRoom);
+    }
 
     return orderedPath;
   }
@@ -162,9 +171,10 @@ class _FinderViewState extends State<FinderView>
     with InteractiveImageMixin<FinderView> {
   bool _isLoading = true;
   bool _isSearchMode = true;
-  static const String _buildingDataAssetPath = 'assets/data/buildings.json';
+  static const String _buildingDataAssetPath = 'data/buildings.json';
 
   final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
   BuildingRoomInfo? _selectedRoomInfo;
   String? _currentBuildingRoomId;
 
@@ -182,6 +192,7 @@ class _FinderViewState extends State<FinderView>
   @override
   void dispose() {
     _searchController.dispose();
+    _searchFocusNode.dispose();
     super.dispose();
   }
 
@@ -191,8 +202,11 @@ class _FinderViewState extends State<FinderView>
       if (!mounted) return;
       final container = context.read<BDataContainer>();
       container.loadBuildingsFromJson(raw);
+      syncToBuilding(container);
     } catch (error) {
-      debugPrint('Failed to load building data: $error');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('データの読み込みに失敗しました: $error')),
+      );
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -231,9 +245,14 @@ class _FinderViewState extends State<FinderView>
     BuildingRoomInfo info, {
     bool switchToDetail = false,
   }) {
+    final wasSearchMode = _isSearchMode;
     container.setActiveBuilding(info.buildingId);
     final selectedRoom = container.findElementById(info.room.id);
     if (selectedRoom == null) return;
+
+    if (switchToDetail) {
+      container.requestEditorInheritance(info.buildingId);
+    }
     container.clearActiveRouteNodes();
     if (switchToDetail) {
       FocusScope.of(context).unfocus();
@@ -246,6 +265,10 @@ class _FinderViewState extends State<FinderView>
       _currentBuildingRoomId = info.room.id;
     });
     syncToBuilding(container, focusElement: selectedRoom);
+
+    if (switchToDetail && wasSearchMode) {
+      _startNavigation(container);
+    }
   }
 
   void _returnToSearch(BDataContainer container) {
@@ -260,11 +283,44 @@ class _FinderViewState extends State<FinderView>
     });
   }
 
+  CachedSData? _resolveNavigationTarget(BDataContainer container) {
+    final selected = selectedElement;
+    if (selected != null) {
+      final candidate = container.findElementById(selected.id);
+      if (candidate != null) {
+        final activeRoute = container.activeRouteNodes;
+        final bool isRouteStart =
+            activeRoute.isNotEmpty && activeRoute.first.id == candidate.id;
+        if (!isRouteStart || _selectedRoomInfo == null) {
+          return candidate;
+        }
+      }
+    }
+    final info = _selectedRoomInfo;
+    if (info == null) return null;
+    return container.findElementById(info.room.id);
+  }
+
   Future<void> _startNavigation(BDataContainer container) async {
-    final roomInfo = _selectedRoomInfo;
-    if (roomInfo == null) return;
-    final targetRoom = container.findElementById(roomInfo.room.id);
-    if (targetRoom == null) return;
+    final targetElement = _resolveNavigationTarget(container);
+    if (targetElement == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('目的地が選択されていません。')),
+      );
+      return;
+    }
+
+    final buildingId = container.activeBuildingId;
+    if (targetElement.type == PlaceType.room && buildingId != null && mounted) {
+      setState(() {
+        _selectedRoomInfo = BuildingRoomInfo(
+          buildingId: buildingId,
+          buildingName: container.buildingName,
+          room: targetElement,
+        );
+        _currentBuildingRoomId = targetElement.id;
+      });
+    }
 
     final entrances = container.cachedSDataList
         .where((e) => e.type == PlaceType.entrance)
@@ -272,6 +328,9 @@ class _FinderViewState extends State<FinderView>
 
     if (entrances.isEmpty) {
       debugPrint("この建物に入口が見つかりません。");
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("この建物に入口が見つかりません。")),
+      );
       return;
     }
 
@@ -287,12 +346,15 @@ class _FinderViewState extends State<FinderView>
     final routeNodes = pathfinder.findPath(
       container,
       startNode.id,
-      targetRoom.id,
+      targetElement.id,
     );
 
     if (routeNodes.isEmpty) {
       container.clearActiveRouteNodes();
       debugPrint('ルートが見つかりません。');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('ルートが見つかりません。')),
+      );
     } else {
       container.setActiveRouteNodes(routeNodes);
     }
@@ -310,6 +372,16 @@ class _FinderViewState extends State<FinderView>
     BDataContainer container,
   ) {
     if (entrances.isEmpty) return Future.value(null);
+
+    final firstEntrance = entrances.first;
+    syncToBuilding(container, focusElement: firstEntrance);
+    if (mounted) {
+      setState(() {
+        selectedElement = firstEntrance;
+        tapPosition = firstEntrance.position;
+      });
+    }
+
     final initialId = entrances.first.id;
     return showGeneralDialog<CachedSData>(
       context: context,
@@ -360,27 +432,34 @@ class _FinderViewState extends State<FinderView>
                         ),
                         const SizedBox(height: 12),
                         SizedBox(
-                          height: min(entrances.length * 56.0, 280),
+                          height: min(entrances.length * 40.0, 220),
                           child: ListView.builder(
+                            padding: EdgeInsets.zero,
+                            itemExtent: 40.0,
                             itemCount: entrances.length,
                             itemBuilder: (context, index) {
                               final entrance = entrances[index];
                               final title = entrance.name.isEmpty
                                   ? entrance.id
                                   : entrance.name;
-                              return RadioListTile<String>(
+                              return ListTile(
                                 dense: true,
-                                value: entrance.id,
-                                groupValue: selectedId,
+                                leading: Icon(
+                                  selectedId == entrance.id
+                                      ? Icons.radio_button_checked
+                                      : Icons.radio_button_unchecked,
+                                  color: selectedId == entrance.id
+                                      ? Theme.of(context).colorScheme.primary
+                                      : null,
+                                ),
                                 title: Text(
                                   title,
-                                  style: const TextStyle(fontSize: 14),
+                                  style: const TextStyle(fontSize: 16),
                                 ),
-                                onChanged: (value) {
-                                  if (value == null) return;
-                                  setSheetState(() => selectedId = value);
+                                onTap: () {
+                                  setSheetState(() => selectedId = entrance.id);
                                   final focusEntrance = entrances.firstWhere(
-                                    (e) => e.id == value,
+                                    (e) => e.id == entrance.id,
                                   );
                                   syncToBuilding(
                                     container,
@@ -412,6 +491,9 @@ class _FinderViewState extends State<FinderView>
                             const SizedBox(width: 12),
                             Expanded(
                               child: ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.green,
+                                ),
                                 onPressed: () {
                                   final selected = entrances.firstWhere(
                                     (e) => e.id == selectedId,
@@ -421,7 +503,7 @@ class _FinderViewState extends State<FinderView>
                                 },
                                 child: const Text(
                                   '確定',
-                                  style: TextStyle(fontSize: 14),
+                                  style: TextStyle(fontSize: 14, color: Colors.white),
                                 ),
                               ),
                             ),
@@ -448,19 +530,6 @@ class _FinderViewState extends State<FinderView>
     );
   }
 
-  String _selectedElementLabel(BDataContainer container) {
-    final el = selectedElement;
-    if (el != null) {
-      final displayName = (el.name.isNotEmpty) ? el.name : el.id;
-      return displayName;
-    } else if (_selectedRoomInfo != null) {
-      final r = _selectedRoomInfo!.room;
-      return (r.name.isNotEmpty) ? r.name : r.id;
-    } else {
-      return '-';
-    }
-  }
-
   Widget _buildSearchContent(
     BDataContainer container,
     List<BuildingRoomInfo> allRooms,
@@ -472,6 +541,7 @@ class _FinderViewState extends State<FinderView>
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
           child: TextField(
             controller: _searchController,
+            focusNode: _searchFocusNode,
             enabled: !_isLoading,
             onChanged: (_) => setState(() {}),
             decoration: InputDecoration(
@@ -539,12 +609,13 @@ class _FinderViewState extends State<FinderView>
     final roomsInBuilding = _selectedRoomInfo == null
         ? <BuildingRoomInfo>[]
         : allRooms
-              .where((info) => info.buildingId == _selectedRoomInfo!.buildingId)
-              .toList();
+            .where((info) => info.buildingId == _selectedRoomInfo!.buildingId)
+            .toList();
     final hasValue = roomsInBuilding.any(
       (info) => info.room.id == _currentBuildingRoomId,
     );
     final dropdownValue = hasValue ? _currentBuildingRoomId : null;
+    final navigationTarget = _resolveNavigationTarget(container);
 
     return Column(
       children: [
@@ -610,7 +681,7 @@ class _FinderViewState extends State<FinderView>
         const SizedBox(height: 4),
 
         SizedBox(
-          height: 78,
+          height: 100,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16.0),
             child: Column(
@@ -624,7 +695,7 @@ class _FinderViewState extends State<FinderView>
                             ? '建物: ${_selectedRoomInfo!.buildingName}'
                             : '建物: -',
                         style: const TextStyle(
-                          fontSize: 14,
+                          fontSize: 12,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -647,22 +718,37 @@ class _FinderViewState extends State<FinderView>
                   ],
                 ),
                 const SizedBox(height: 8),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                  onPressed: (_selectedRoomInfo == null || _isLoading)
-                      ? null
-                      : () => _startNavigation(container),
-                  child: const Text(
-                    'ナビゲーションを開始する!',
-                    style: TextStyle(fontSize: 14, color: Colors.white),
-                  ),
-                ),
+                _selectedRoomInfo == null
+                    ? const SizedBox.shrink()
+                    : ElevatedButton(
+                        style:
+                            ElevatedButton.styleFrom(backgroundColor: Colors.green),
+                        onPressed: _isLoading
+                            ? null
+                            : () => _startNavigation(container),
+                        child: const Text(
+                          'ルートを検索する!',
+                          style: TextStyle(fontSize: 14, color: Colors.white),
+                        ),
+                      ),
               ],
             ),
           ),
         ),
       ],
     );
+  }
+
+  String _selectedElementLabel(BDataContainer container) {
+    final target = _resolveNavigationTarget(container);
+    if (target != null) {
+      return target.name.isNotEmpty ? target.name : target.id;
+    }
+    if (_selectedRoomInfo != null) {
+      final r = _selectedRoomInfo!.room;
+      return r.name.isNotEmpty ? r.name : r.id;
+    }
+    return '-';
   }
 
   @override
@@ -679,15 +765,52 @@ class _FinderViewState extends State<FinderView>
   }
 
   @override
+  void syncToBuilding(BDataContainer container, {CachedSData? focusElement}) {
+    super.syncToBuilding(container, focusElement: focusElement);
+    if (_selectedRoomInfo == null) return;
+    final activeId = container.activeBuildingId;
+    final selectedStillExists =
+        container.findElementById(_selectedRoomInfo!.room.id) != null;
+    final hasMismatch = activeId == null ||
+        _selectedRoomInfo!.buildingId != activeId ||
+        !selectedStillExists;
+    if (hasMismatch) {
+      setState(() {
+        _isSearchMode = true;
+        _selectedRoomInfo = null;
+        _currentBuildingRoomId = null;
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Consumer<BDataContainer>(
       builder: (context, container, child) {
         final allRooms = _sortedRooms(container.getAllRoomInfos());
         final shouldShowSearch = _isSearchMode || _selectedRoomInfo == null;
-        return Container(
-          child: shouldShowSearch
-              ? _buildSearchContent(container, allRooms)
-              : _buildDetailContent(container, allRooms),
+        return Stack(
+          children: [
+            Container(
+              child: shouldShowSearch
+                  ? _buildSearchContent(container, allRooms)
+                  : _buildDetailContent(container, allRooms),
+            ),
+            if (shouldShowSearch)
+              Positioned(
+                bottom: 24,
+                right: 24,
+                child: FloatingActionButton(
+                  heroTag: 'focus_search',
+                  onPressed: () {
+                    FocusScope.of(context).requestFocus(_searchFocusNode);
+                  },
+                  backgroundColor: Colors.green,
+                  child: const Icon(Icons.search),
+                  tooltip: '検索ボックスにフォーカス',
+                ),
+              ),
+          ],
         );
       },
     );

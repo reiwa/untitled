@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:test_project/RoomFinderApp.dart';
 import 'package:test_project/RoomFinderAppEditor.dart';
-import 'package:test_project/RoomFinderAppShared.dart';
+import 'package:test_project/RoomFinderWidgets.dart';
+import 'package:test_project/RoomFinderModels.dart';
 
 void main() {
   runApp(
@@ -35,11 +36,11 @@ class _RoomFinderState extends State<RoomFinder> {
             Container(
               width: 360,
               height: 600,
-              color: Colors.grey[200],
+              color: Colors.grey[50],
               child: currentView,
             ),
             Positioned(
-              bottom: 16,
+              bottom: 0,
               right: 16,
               child: PopupMenuButton<CustomViewType>(
                 onSelected: (type) {
@@ -81,7 +82,7 @@ class _MyAppState extends State<MyApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      showPerformanceOverlay: true,
+      //showPerformanceOverlay: true,
 
       title: 'Hello Flutter',
       home: Scaffold(
