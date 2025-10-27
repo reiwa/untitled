@@ -1,16 +1,20 @@
-# test_project
+# RoomFinder
 
-A new Flutter project.
+教室までのルートを案内するアプリです。
 
-## Getting Started
+## Todo　（↑↓優先順）
 
-This project is a starting point for a Flutter application.
+・スムーズな自動階層遷移（1F->nF） (Easing?
+・ナビゲーション表示方法の再検討
+・選択要素のピン表示
+・検索部屋数の制限　'もっと探す!'追加
+・階層表示をInteractiveViewer内にStack
+・外部からのナビゲーション呼び出し
+・jsonファイルの自動上書き・更新
 
-A few resources to get you started if this is your first Flutter project:
-
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+コンスタント
+・致命エラー対策
+・パフォーマンス改善
+・UI改善
+・アニメーション追加
+・建物の登録
