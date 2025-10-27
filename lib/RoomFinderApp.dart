@@ -171,7 +171,7 @@ class _FinderViewState extends State<FinderView>
     with InteractiveImageMixin<FinderView> {
   bool _isLoading = true;
   bool _isSearchMode = true;
-  static const String _buildingDataAssetPath = 'data/buildings.json';
+  static const String _buildingDataAssetPath = 'assets/data/buildings.json';
 
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();

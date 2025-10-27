@@ -213,6 +213,19 @@ mixin InteractiveImageMixin<T extends CustomView> on State<T> {
     _suppressClearOnPageChange = false;
   }
 
+  ScrollPhysics _pagePhysics = const NeverScrollableScrollPhysics();
+
+  @override
+  void initState() {
+    super.initState();
+    final bool canSwipe = canSwipeFloors;
+    //_pagePhysics = const NeverScrollableScrollPhysics();
+    _pagePhysics = TolerantPageScrollPhysics(
+      canScroll: () => true,
+      directionTolerance: pi / 6,
+    );
+  }
+
   bool _pendingContainerSync = false;
 
   Widget buildInteractiveImage() {
@@ -220,56 +233,42 @@ mixin InteractiveImageMixin<T extends CustomView> on State<T> {
       child: Container(
         decoration: BoxDecoration(
           border: Border.all(
-        color: Colors.green.withValues(alpha: 0.45),
-        width: 2.0,
+            color: Colors.green.withValues(alpha: 0.45),
+            width: 2.0,
           ),
           borderRadius: BorderRadius.circular(12.0),
         ),
         clipBehavior: Clip.hardEdge,
-      child: Consumer<BDataContainer>(
-        builder: (context, bDataContainer, child) {
-          _ensureActiveBuildingSynced(bDataContainer);
-          final bool canSwipe = canSwipeFloors;
-          final ScrollPhysics pagePhysics = canSwipe
-              ? TolerantPageScrollPhysics(
-                  canScroll: () => true,
-                  directionTolerance: pi / 6,
-                )
-              : const NeverScrollableScrollPhysics();
+        child: Consumer<BDataContainer>(
+          builder: (context, bDataContainer, child) {
+            _ensureActiveBuildingSynced(bDataContainer);
 
-          return ScrollConfiguration(
-            behavior: ScrollConfiguration.of(context).copyWith(
-              dragDevices: {
-                PointerDeviceKind.touch,
-                PointerDeviceKind.stylus,
-                PointerDeviceKind.mouse,
-              },
-            ),
-            child: PageView.builder(
-              controller: pageController,
-              scrollDirection: Axis.vertical,
-              physics: pagePhysics,
-              itemCount: bDataContainer.floorCount,
-              onPageChanged: _handlePageChanged,
-              itemBuilder: (context, pageIndex) {
-                final int floor = bDataContainer.floorCount - pageIndex;
+            return Listener(
+              child: PageView.builder(
+                controller: pageController,
+                scrollDirection: Axis.vertical,
+                physics: _pagePhysics,
+                itemCount: bDataContainer.floorCount,
+                onPageChanged: _handlePageChanged,
+                itemBuilder: (context, pageIndex) {
+                  final int floor = bDataContainer.floorCount - pageIndex;
 
-                final double pointerSize =
-                    12 /
-                    sqrt(transformationController.value.getMaxScaleOnAxis());
+                  final double pointerSize =
+                      12 /
+                      sqrt(transformationController.value.getMaxScaleOnAxis());
 
-                return _buildFloorPage(
-                  context,
-                  bDataContainer,
-                  floor,
-                  pointerSize,
-                );
-              },
-            ),
-          );
-        },
+                  return _buildFloorPage(
+                    context,
+                    bDataContainer,
+                    floor,
+                    pointerSize,
+                  );
+                },
+              ),
+            );
+          },
+        ),
       ),
-    ),
     );
   }
 
@@ -348,6 +347,8 @@ mixin InteractiveImageMixin<T extends CustomView> on State<T> {
     final Set<String> routeElevatorPairs = {};
     final Set<String> routeElevatorDirections = {};
     final routeVisualSegments = <RouteVisualSegment>[];
+
+    var cachedScale = transformationController.value.getMaxScaleOnAxis();
     for (final segment in routeSegments) {
       if (segment.from.floor == floor && segment.to.floor == floor) {
         routeVisualSegments.add(
@@ -446,25 +447,37 @@ mixin InteractiveImageMixin<T extends CustomView> on State<T> {
         return Container(
           decoration: BoxDecoration(
             border: Border(
-              top: BorderSide(color: Colors.green.withValues(alpha: 0.45), width: 1.0),
-              bottom: BorderSide(color: Colors.green.withValues(alpha: 0.45), width: 1.0),
+              top: BorderSide(
+                color: Colors.green.withValues(alpha: 0.45),
+                width: 1.0,
+              ),
+              bottom: BorderSide(
+                color: Colors.green.withValues(alpha: 0.45),
+                width: 1.0,
+              ),
             ),
           ),
           clipBehavior: Clip.hardEdge,
           child: Stack(
             children: [
-              IgnorePointer(
-                ignoring: canSwipeFloors,
-                child: InteractiveViewer(
+                InteractiveViewer(
                   transformationController: transformationController,
                   minScale: _minScale,
                   maxScale: _maxScale,
-                  panEnabled: !canSwipeFloors,
+                  panEnabled: true,
                   clipBehavior: Clip.hardEdge,
                   boundaryMargin: const EdgeInsets.all(200),
+                  onInteractionStart: (details) {
+                    debugPrint('pass - Interaction started');
+                    cachedScale = transformationController.value
+                        .getMaxScaleOnAxis();
+                  },
                   onInteractionEnd: (details) {
                     if (transformationController.value.getMaxScaleOnAxis() <=
-                        1.0) {
+                        1.05 && cachedScale -
+                            transformationController.value
+                                .getMaxScaleOnAxis() > 0) {
+                          debugPrint('pass - Resetting scale + ${details.velocity.pixelsPerSecond}');
                       transformationController.value = Matrix4.identity();
                     }
                   },
@@ -650,9 +663,8 @@ mixin InteractiveImageMixin<T extends CustomView> on State<T> {
                     ),
                   ),
                 ),
-              ),
 
-              Positioned(
+              /*Positioned(
                 right: 10.0,
                 bottom: 10.0,
                 child: IconButton(
@@ -676,7 +688,7 @@ mixin InteractiveImageMixin<T extends CustomView> on State<T> {
                     setState(() {});
                   },
                 ),
-              ),
+              ),*/
             ],
           ),
         );
