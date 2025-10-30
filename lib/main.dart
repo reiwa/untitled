@@ -1,18 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:test_project/RoomFinderApp.dart';
-import 'package:test_project/RoomFinderAppEditor.dart';
-import 'package:test_project/RoomFinderWidgets.dart';
-import 'package:test_project/RoomFinderModels.dart';
+import 'package:test_project/room_finder/room_finder_app.dart';
+import 'package:test_project/room_editor/room_finder_app_editor.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 void main() {
-  runApp(
-    ChangeNotifierProvider(
-      create: (_) =>
-          BDataContainer('全学講義棟1号館', 2, 'zenkou', List.empty(), List.empty()),
-      child: const MyApp(),
-    ),
-  );
+  runApp(const ProviderScope(child: MyApp()));
 }
 
 class RoomFinder extends StatefulWidget {
@@ -25,7 +17,7 @@ class RoomFinder extends StatefulWidget {
 enum CustomViewType { editor, finder }
 
 class _RoomFinderState extends State<RoomFinder> {
-  CustomView currentView = new EditorView();
+  Widget currentView = const EditorView();
 
   @override
   Widget build(BuildContext context) {
@@ -50,12 +42,12 @@ class _RoomFinderState extends State<RoomFinder> {
                         : const FinderView();
                   });
                 },
-                itemBuilder: (context) => [
-                  const PopupMenuItem(
+                itemBuilder: (context) => const [
+                  PopupMenuItem(
                     value: CustomViewType.editor,
                     child: Text('Editor'),
                   ),
-                  const PopupMenuItem(
+                  PopupMenuItem(
                     value: CustomViewType.finder,
                     child: Text('Finder'),
                   ),
