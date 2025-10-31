@@ -5,27 +5,29 @@ void handlePageChangedLogic<T extends CustomView>(
   int pageIndex,
   WidgetRef ref,
 ) {
-  final active = ref.read(activeBuildingProvider);
-  host.setState(() {
-    host._currentFloor = active.floorCount - pageIndex;
-    host.activeBuildingId = active.id;
+  final notifier = ref.read(interactiveImageProvider.notifier);
+  final prev = ref.read(interactiveImageProvider);
 
-    if (!host._suppressClearOnPageChange) {
-      host.tapPosition = null;
-      host.selectedElement = null;
-      if (host is EditorControllerHost) {
-        final editor = host as EditorControllerHost;
-        editor.nameController.clear();
-        editor.xController.clear();
-        editor.yController.clear();
-      }
-    }
+  notifier.handlePageChanged(pageIndex, ref);
 
-    host.isDragging = false;
-  });
+  final next = ref.read(interactiveImageProvider);
+  if (!next.suppressClearOnPageChange &&
+      next.selectedElement == null &&
+      prev.selectedElement != null &&
+      host is EditorControllerHost) {
+    final editor = host as EditorControllerHost;
+    editor.nameController.clear();
+    editor.xController.clear();
+    editor.yController.clear();
+  }
 
   WidgetsBinding.instance.addPostFrameCallback((_) {
-    applyPendingFocusIfAnyLogic(host);
+    notifier.applyPendingFocusIfAny();
+
+    final current = ref.read(interactiveImageProvider);
+    if (current.pendingFocusElement != null) {
+      host.transformationController.value = Matrix4.identity();
+    }
   });
 }
 
@@ -34,6 +36,7 @@ void ensureActiveBuildingSyncedLogic<T extends CustomView>(
   WidgetRef ref,
 ) {
   final active = ref.read(activeBuildingProvider);
+  final imgState = ref.read(interactiveImageProvider);
 
   if (host.widget.mode == CustomViewMode.editor &&
       active.id != kDraftBuildingId) {
@@ -49,7 +52,9 @@ void ensureActiveBuildingSyncedLogic<T extends CustomView>(
 
   if (host.widget.mode == CustomViewMode.finder &&
       (active.id == kDraftBuildingId)) {
-    final fallbackId = ref.read(buildingRepositoryProvider.notifier).firstNonDraftBuildingId;
+    final fallbackId = ref
+        .read(buildingRepositoryProvider.notifier)
+        .firstNonDraftBuildingId;
     if (fallbackId != null &&
         fallbackId != active.id &&
         !host._pendingContainerSync) {
@@ -63,10 +68,8 @@ void ensureActiveBuildingSyncedLogic<T extends CustomView>(
     return;
   }
 
-  final buildingMismatch =
-      active.id != host.activeBuildingId;
-  final floorOutOfRange =
-      host.currentFloor > active.floorCount;
+  final buildingMismatch = active.id != imgState.activeBuildingId;
+  final floorOutOfRange = imgState.currentFloor > active.floorCount;
 
   if ((buildingMismatch || floorOutOfRange) && !host._pendingContainerSync) {
     host._pendingContainerSync = true;
@@ -83,59 +86,31 @@ void syncToBuildingLogic<T extends CustomView>(
   WidgetRef ref, {
   CachedSData? focusElement,
 }) {
-  final active = ref.read(activeBuildingProvider);
-  final targetFloor = focusElement?.floor ?? 1;
-  final clampedFloor = targetFloor < 1
-      ? 1
-      : (targetFloor > active.floorCount
-          ? active.floorCount
-          : targetFloor);
-  final pageIndex = active.floorCount - clampedFloor;
+  final notifier = ref.read(interactiveImageProvider.notifier);
+  final pageIndex = notifier.syncToBuilding(ref, focusElement: focusElement);
 
-  final needsFloorChange = clampedFloor != host._currentFloor;
-
-  host.setState(() {
-    host.activeBuildingId = active.id;
-    host._currentFloor = clampedFloor;
-
-    if (needsFloorChange && focusElement != null) {
-      host._pendingFocusElement = focusElement;
-      host._suppressClearOnPageChange = true;
-      host.tapPosition = null;
-    } else {
-      host.tapPosition = focusElement?.position;
-      host.selectedElement = focusElement;
-      host.transformationController.value = Matrix4.identity();
-    }
-
-    host.isDragging = false;
-    host.isConnecting = false;
-    host.connectingStart = null;
-    host.previewPosition = null;
-  });
-
-  if (needsFloorChange) {
+  if (pageIndex != null) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (host.pageController.hasClients) {
         host.pageController.jumpToPage(pageIndex);
       } else {
-        applyPendingFocusIfAnyLogic(host);
+        applyPendingFocusIfAnyLogic(host, ref);
       }
     });
+  } else {
+    host.transformationController.value = Matrix4.identity();
   }
 }
 
 void applyPendingFocusIfAnyLogic<T extends CustomView>(
   InteractiveImageMixin<T> host,
+  WidgetRef ref,
 ) {
-  if (host._pendingFocusElement != null) {
-    final focus = host._pendingFocusElement!;
-    host.setState(() {
-      host.selectedElement = focus;
-      host.tapPosition = focus.position;
-      host.transformationController.value = Matrix4.identity();
-    });
+  final hadPending = ref.read(interactiveImageProvider).pendingFocusElement != null;
+
+  ref.read(interactiveImageProvider.notifier).applyPendingFocusIfAny();
+
+  if (hadPending) {
+    host.transformationController.value = Matrix4.identity();
   }
-  host._pendingFocusElement = null;
-  host._suppressClearOnPageChange = false;
 }

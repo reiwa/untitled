@@ -2,14 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:test_project/models/element_data_models.dart';
-import 'package:uuid/uuid.dart';
+import 'package:test_project/viewer/interactive_image_state.dart';
 import 'package:test_project/models/room_finder_models.dart';
 import 'package:test_project/viewer/room_finder_viewer.dart';
 
 import 'building_settings_dialog.dart';
 import 'editor_fixed_screen.dart';
 import 'editor_action_screen.dart';
-import 'editor_connection_handler.dart';
 import 'snapshot_screen.dart';
 
 abstract class EditorControllerHost {
@@ -52,33 +51,81 @@ class _EditorViewState extends ConsumerState<EditorView>
   }
 
   void _prepareEditorDraft() {
-    final container = ProviderScope.containerOf(context, listen: false);
-    container.read(activeBuildingProvider.notifier).startDraftFromActive();
+    ref.read(activeBuildingProvider.notifier).startDraftFromActive();
   }
 
   @override
   void initState() {
     super.initState();
+
+    final snap = ref.read(activeBuildingProvider);
+    final imageState = ref.read(interactiveImageProvider);
+    pageController = PageController(
+      initialPage: snap.floorCount - imageState.currentFloor,
+    );
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _prepareEditorDraft();
       }
+
+      final snap = ref.read(activeBuildingProvider);
+      final notifier = ref.read(interactiveImageProvider.notifier);
+
+      notifier.handleBuildingChanged(snap.id);
+
+      ref.read(activeRouteProvider.notifier).clearActiveRouteNodes();
+
+      _xController.addListener(_updateTapPositionFromTextFields);
+      _yController.addListener(_updateTapPositionFromTextFields);
+      _nameController.addListener(_updateNameFromTextField);
+
+      isPageScrollable = canSwipeFloors;
+      transformationController.addListener(_updatePhysicsOnZoomChange);
+
+      ref.listenManual<InteractiveImageState>(interactiveImageProvider, (prev, next) {
+        if (!mounted) return;
+        if (prev?.selectedElement?.id != next.selectedElement?.id) {
+          final sel = next.selectedElement;
+          if (sel == null) {
+            _nameController.clear();
+            _xController.clear();
+            _yController.clear();
+          } else {
+            _nameController.text = sel.name;
+            _xController.text = sel.position.dx.toStringAsFixed(0);
+            _yController.text = sel.position.dy.toStringAsFixed(0);
+          }
+        }
+        if (next.selectedElement == null &&
+            prev?.tapPosition != next.tapPosition) {
+          final p = next.tapPosition;
+          if (p == null) {
+            _nameController.clear();
+            _xController.clear();
+            _yController.clear();
+          } else {
+            _nameController.text = '新しい要素';
+            _xController.text = p.dx.toStringAsFixed(0);
+            _yController.text = p.dy.toStringAsFixed(0);
+          }
+        }
+
+        if (prev?.currentFloor != next.currentFloor) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+
+            ref
+                .read(interactiveImageProvider.notifier)
+                .applyPendingFocusIfAny();
+
+            if (next.pendingFocusElement != null) {
+              transformationController.value = Matrix4.identity();
+            }
+          });
+        }
+      });
     });
-
-    final container = ProviderScope.containerOf(context, listen: false);
-    final snap = container.read(activeBuildingProvider);
-
-    pageController = PageController(
-      initialPage: snap.floorCount - currentFloor,
-    );
-    activeBuildingId = snap.id;
-
-    _xController.addListener(_updateTapPositionFromTextFields);
-    _yController.addListener(_updateTapPositionFromTextFields);
-    _nameController.addListener(_updateNameFromTextField);
-
-    isPageScrollable = canSwipeFloors;
-    transformationController.addListener(_updatePhysicsOnZoomChange);
   }
 
   @override
@@ -97,120 +144,32 @@ class _EditorViewState extends ConsumerState<EditorView>
   }
 
   void _updateNameFromTextField() {
-    if (isDragging || selectedElement == null) return;
-
-    final trimmedName = _nameController.text.trim();
-    if (trimmedName == selectedElement!.name) return;
-
-    final container = ProviderScope.containerOf(context, listen: false);
-    final updatedData = selectedElement!.copyWith(name: trimmedName);
-    container.read(activeBuildingProvider.notifier).updateSData(updatedData);
-    setState(() => selectedElement = updatedData);
+    ref
+        .read(interactiveImageProvider.notifier)
+        .updateElementName(_nameController.text, ref);
   }
 
   void _updateTapPositionFromTextFields() {
-    if (isDragging || selectedElement == null) return;
-
     final double? x = double.tryParse(_xController.text);
     final double? y = double.tryParse(_yController.text);
     if (x == null || y == null) return;
-
-    final newPosition = Offset(x, y);
-    if (selectedElement!.position == newPosition) return;
-
-    final container = ProviderScope.containerOf(context, listen: false);
-    final updatedData = selectedElement!.copyWith(position: newPosition);
-    container.read(activeBuildingProvider.notifier).updateSData(updatedData);
-    setState(() {
-      tapPosition = newPosition;
-      selectedElement = updatedData;
-    });
+    ref
+        .read(interactiveImageProvider.notifier)
+        .updateElementPosition(Offset(x, y), ref);
   }
 
   @override
   void onTapDetected(Offset position) {
-    final container = ProviderScope.containerOf(context, listen: false);
-    final active = container.read(activeBuildingProvider);
-
-    if (isConnecting) {
-      final tappedElement = findElementAtPosition(
-        position,
-        active.elements.where((sData) => sData.floor == currentFloor),
-      );
-      final start = connectingStart;
-      final bool canConnect =
-          start != null && tappedElement != null && canConnectNodes(start, tappedElement);
-      if (canConnect) {
-        container.read(activeBuildingProvider.notifier).addEdge(start.id, tappedElement.id);
-        setState(() {
-          isConnecting = false;
-          connectingStart = null;
-          previewPosition = null;
-          tapPosition = null;
-        });
-        _nameController.clear();
-        _xController.clear();
-        _yController.clear();
-      }
-      return;
-    }
-
-    if (selectedElement != null) {
-      final distance = (position - selectedElement!.position).distance;
-      if (distance > 12.0) {
-        setState(() {
-          selectedElement = null;
-          tapPosition = position;
-        });
-        _nameController.text = '新しい要素';
-        _xController.text = position.dx.toStringAsFixed(0);
-        _yController.text = position.dy.toStringAsFixed(0);
-        return;
-      }
-    }
-
-    setState(() {
-      if (tapPosition == position) {
-        tapPosition = null;
-        _nameController.clear();
-        _xController.clear();
-        _yController.clear();
-      } else {
-        tapPosition = position;
-      }
-    });
-
-    if (selectedElement == null) {
-      _xController.text = position.dx.toStringAsFixed(0);
-      _yController.text = position.dy.toStringAsFixed(0);
-      _nameController.text = '新しい要素';
-    }
+    ref.read(interactiveImageProvider.notifier).handleTapEditor(position, ref);
   }
 
   void _toggleConnectionMode() {
-    if (isConnecting) {
-      setState(() {
-        isConnecting = false;
-        connectingStart = null;
-        previewPosition = null;
-      });
-    } else if (selectedElement != null && selectedElement!.type.isGraphNode) {
-      setState(() {
-        isConnecting = true;
-        connectingStart = selectedElement;
-        selectedElement = null;
-        tapPosition = null;
-        previewPosition = Offset.zero;
-      });
-      _nameController.clear();
-      _xController.clear();
-      _yController.clear();
-    }
+    ref.read(interactiveImageProvider.notifier).toggleConnectionMode();
   }
 
   void _openSettingsDialog() async {
-    final container = ProviderScope.containerOf(context, listen: false);
-    final active = container.read(activeBuildingProvider);
+    final active = ref.read(activeBuildingProvider);
+    final imageState = ref.watch(interactiveImageProvider);
 
     final BuildingSettings? newSettings = await showDialog<BuildingSettings>(
       context: context,
@@ -225,23 +184,22 @@ class _EditorViewState extends ConsumerState<EditorView>
     );
 
     if (newSettings != null && mounted) {
-      container.read(activeBuildingProvider.notifier).updateBuildingSettings(
+      ref
+          .read(activeBuildingProvider.notifier)
+          .updateBuildingSettings(
             name: newSettings.buildingName,
             floors: newSettings.floorCount,
             pattern: newSettings.imageNamePattern,
           );
 
-      if (currentFloor > newSettings.floorCount) {
+      if (imageState.currentFloor > newSettings.floorCount) {
         pageController.jumpToPage(newSettings.floorCount - 1);
-      } else {
-        setState(() {});
       }
     }
   }
 
   void _rebuildRoomPassageEdges() {
-    final container = ProviderScope.containerOf(context, listen: false);
-    container.read(activeBuildingProvider.notifier).rebuildRoomPassageEdges();
+    ref.read(activeBuildingProvider.notifier).rebuildRoomPassageEdges();
   }
 
   void _handleAddPressed() {
@@ -254,33 +212,21 @@ class _EditorViewState extends ConsumerState<EditorView>
       return;
     }
 
-    final newSData = CachedSData(
-      id: const Uuid().v4(),
-      name: name,
-      position: Offset(x, y),
-      floor: currentFloor,
-      type: currentType,
-    );
-    final container = ProviderScope.containerOf(context, listen: false);
-    container.read(activeBuildingProvider.notifier).addSData(newSData);
-    setState(() {
-      tapPosition = null;
-      selectedElement = null;
-      _nameController.clear();
-      _xController.clear();
-      _yController.clear();
-    });
+    ref
+        .read(interactiveImageProvider.notifier)
+        .addElement(name: name, position: Offset(x, y), ref: ref);
   }
 
   Future<void> _handleDeletePressed() async {
-    final elementToDelete = selectedElement;
+    final elementToDelete = ref.read(interactiveImageProvider).selectedElement;
     if (elementToDelete == null) return;
 
-    final container = ProviderScope.containerOf(context, listen: false);
     bool shouldDelete = true;
 
     if (elementToDelete.type.isGraphNode &&
-        container.read(activeBuildingProvider.notifier).hasEdges(elementToDelete.id)) {
+        ref
+            .read(activeBuildingProvider.notifier)
+            .hasEdges(elementToDelete.id)) {
       final bool? confirmed = await showDialog<bool>(
         context: context,
         builder: (dialogContext) {
@@ -311,44 +257,32 @@ class _EditorViewState extends ConsumerState<EditorView>
 
     if (!shouldDelete || !mounted) return;
 
-    container.read(activeBuildingProvider.notifier).removeSData(elementToDelete);
-    setState(() {
-      selectedElement = null;
-      tapPosition = null;
-      _nameController.clear();
-      _xController.clear();
-      _yController.clear();
-    });
-  }
-
-  Future<void> _handleCopySnapshot(String displaySText) async {
-    await Clipboard.setData(ClipboardData(text: displaySText));
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('コピーしました')),
-      );
-    }
+    ref.read(interactiveImageProvider.notifier).deleteSelectedElement(ref);
   }
 
   @override
   Widget build(BuildContext context) {
-    final container = ProviderScope.containerOf(context, listen: false);
-    final displaySText = container.read(activeBuildingProvider.notifier).buildSnapshot();
+    final imageState = ref.watch(interactiveImageProvider);
+    final building = ref.watch(activeBuildingProvider);
+    final displaySText = ref
+        .read(activeBuildingProvider.notifier)
+        .buildSnapshot();
 
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: <Widget>[
         _FloorHeader(
-          currentFloor: currentFloor,
-          currentType: currentType,
-          onTypeSelected: (type) => setState(() => currentType = type),
+          currentFloor: imageState.currentFloor,
+          currentType: imageState.currentType,
+          onTypeSelected: (type) =>
+              ref.read(interactiveImageProvider.notifier).setCurrentType(type),
         ),
         buildInteractiveImage(),
         const SizedBox(height: 4),
-        if (tapPosition != null || isConnecting)
+        if (imageState.tapPosition != null || imageState.isConnecting)
           EditorActionScreen(
-            isConnecting: isConnecting,
-            selectedElement: selectedElement,
+            isConnecting: imageState.isConnecting,
+            selectedElement: imageState.selectedElement,
             nameController: _nameController,
             xController: _xController,
             yController: _yController,
@@ -357,16 +291,21 @@ class _EditorViewState extends ConsumerState<EditorView>
             onToggleConnect: _toggleConnectionMode,
           )
         else
-          EditorIdleScreen(
-            onRebuildPressed: _rebuildRoomPassageEdges,
-          ),
+          EditorIdleScreen(onRebuildPressed: _rebuildRoomPassageEdges),
         const SizedBox(height: 4),
         Container(height: 2, color: Colors.grey[300]),
         const SizedBox(height: 4),
         SnapshotScreen(
           displaySText: displaySText,
           onSettingsPressed: _openSettingsDialog,
-          onCopyPressed: () => _handleCopySnapshot(displaySText),
+          onCopyPressed: () async {
+            await Clipboard.setData(ClipboardData(text: displaySText));
+            if (mounted) {
+              ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(const SnackBar(content: Text('コピーしました')));
+            }
+          },
         ),
       ],
     );

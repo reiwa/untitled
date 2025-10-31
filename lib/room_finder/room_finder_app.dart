@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:test_project/models/element_data_models.dart';
 import 'package:test_project/models/room_finder_models.dart';
+import 'package:test_project/viewer/interactive_image_state.dart';
 import 'package:test_project/viewer/room_finder_viewer.dart';
-import 'package:test_project/services/path_finder_logic.dart';
 import 'package:test_project/services/building_data_loader.dart';
 import 'detail_screen.dart';
 import 'entrance_selector.dart';
@@ -18,22 +18,18 @@ class FinderView extends CustomView {
 
 class _FinderViewState extends ConsumerState<FinderView>
     with InteractiveImageMixin<FinderView> {
-  bool _isSearchMode = true;
-  bool _needsNavigationOnBuild = false;
-
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
-  BuildingRoomInfo? _selectedRoomInfo;
-  String? _currentBuildingRoomId;
 
   @override
   void initState() {
     super.initState();
+
     final active = ref.read(activeBuildingProvider);
+    final imageState = ref.read(interactiveImageProvider);
     pageController = PageController(
-      initialPage: active.floorCount - currentFloor,
+      initialPage: active.floorCount - imageState.currentFloor,
     );
-    activeBuildingId = active.id;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -41,6 +37,41 @@ class _FinderViewState extends ConsumerState<FinderView>
       if (rooms.isEmpty) {
         loadBuildingData(ref);
       }
+
+      final active = ref.read(activeBuildingProvider);
+      final notifier = ref.read(interactiveImageProvider.notifier);
+
+      notifier.handleBuildingChanged(active.id);
+
+      ref.listenManual<InteractiveImageState>(interactiveImageProvider, (prev, next) {
+        if (!mounted) return;
+        if (next.needsNavigationOnBuild) {
+          ref
+              .read(interactiveImageProvider.notifier)
+              .clearNeedsNavigationOnBuild();
+
+          WidgetsBinding.instance.addPostFrameCallback((_) async {
+            if (!mounted) return;
+            await Future.delayed(const Duration(milliseconds: 50));
+            if (!mounted) return;
+            await _startNavigation();
+          });
+        }
+
+        if (prev?.currentFloor != next.currentFloor) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+
+            ref
+                .read(interactiveImageProvider.notifier)
+                .applyPendingFocusIfAny();
+
+            if (next.pendingFocusElement != null) {
+              transformationController.value = Matrix4.identity();
+            }
+          });
+        }
+      });
     });
   }
 
@@ -82,57 +113,19 @@ class _FinderViewState extends ConsumerState<FinderView>
     BuildingRoomInfo info, {
     bool switchToDetail = false,
   }) {
-    final wasSearchMode = _isSearchMode;
-    notifier.setActiveBuilding(info.buildingId);
-
-    ref.read(activeRouteProvider.notifier).clearActiveRouteNodes();
-    if (switchToDetail) {
-      FocusScope.of(context).unfocus();
-    }
-
-    final bool needsNav = switchToDetail && wasSearchMode;
-
-    setState(() {
-      if (switchToDetail) {
-        _isSearchMode = false;
-      }
-      _selectedRoomInfo = info;
-      _currentBuildingRoomId = info.room.id;
-      if (needsNav) {
-        _needsNavigationOnBuild = true;
-      }
-    });
+    final img = ref.read(interactiveImageProvider.notifier);
+    img.activateRoom(ref, info, switchToDetail: switchToDetail);
   }
 
   void _returnToSearch() {
     FocusScope.of(context).unfocus();
-    ref.read(activeRouteProvider.notifier).clearActiveRouteNodes();
-    setState(() {
-      _isSearchMode = true;
-      _selectedRoomInfo = null;
-      _currentBuildingRoomId = null;
-      selectedElement = null;
-      tapPosition = null;
-    });
+    ref.read(interactiveImageProvider.notifier).returnToSearch(ref);
   }
 
   CachedSData? _resolveNavigationTarget() {
-    final active = ref.read(activeBuildingProvider);
-    final selected = selectedElement;
-    if (selected != null) {
-      final candidate = _findElementById(active, selected.id);
-      if (candidate != null) {
-        final activeRoute = ref.read(activeRouteProvider);
-        final bool isRouteStart =
-            activeRoute.isNotEmpty && activeRoute.first.id == candidate.id;
-        if (!isRouteStart || _selectedRoomInfo == null) {
-          return candidate;
-        }
-      }
-    }
-    final info = _selectedRoomInfo;
-    if (info == null) return null;
-    return _findElementById(active, info.room.id);
+    return ref
+        .read(interactiveImageProvider.notifier)
+        .resolveNavigationTarget(ref);
   }
 
   CachedSData? _findElementById(BuildingSnapshot snapshot, String id) {
@@ -142,14 +135,15 @@ class _FinderViewState extends ConsumerState<FinderView>
     return null;
   }
 
-  void _focusEntrance(CachedSData entrance) {
-    final active = ref.read(activeBuildingProvider);
-    syncToBuilding(active, focusElement: entrance);
-    if (!mounted) return;
-    setState(() {
-      selectedElement = entrance;
-      tapPosition = entrance.position;
-    });
+  Future<void> _focusEntrance(CachedSData entrance) async {
+    final pageIndex = ref
+        .read(interactiveImageProvider.notifier)
+        .syncToBuilding(ref, focusElement: entrance);
+    if (pageIndex != null) {
+      if (pageController.hasClients) {
+        pageController.jumpToPage(pageIndex);
+      }
+    }
   }
 
   Future<void> _startNavigation() async {
@@ -163,14 +157,17 @@ class _FinderViewState extends ConsumerState<FinderView>
     }
 
     if (targetElement.type == PlaceType.room && mounted) {
-      setState(() {
-        _selectedRoomInfo = BuildingRoomInfo(
-          buildingId: active.id,
-          buildingName: active.name,
-          room: targetElement,
-        );
-        _currentBuildingRoomId = targetElement.id;
-      });
+      ref
+          .read(interactiveImageProvider.notifier)
+          .activateRoom(
+            ref,
+            BuildingRoomInfo(
+              buildingId: active.id,
+              buildingName: active.name,
+              room: targetElement,
+            ),
+            switchToDetail: false,
+          );
     }
 
     final entrances = active.elements
@@ -186,10 +183,10 @@ class _FinderViewState extends ConsumerState<FinderView>
     CachedSData? startNode;
     if (entrances.length == 1) {
       startNode = entrances.first;
-      _focusEntrance(startNode);
+      await _focusEntrance(startNode);
     } else {
       final initial = entrances.first;
-      _focusEntrance(initial);
+      await _focusEntrance(initial);
       startNode = await showEntranceSelector(
         context: context,
         entrances: entrances,
@@ -199,83 +196,61 @@ class _FinderViewState extends ConsumerState<FinderView>
     }
     if (startNode == null) return;
 
-    final pathfinder = Pathfinder();
-    final routeNodes = pathfinder.findPathFromSnapshot(
-      active,
-      startNode.id,
-      targetElement.id,
-    );
+    final ok = await ref
+        .read(interactiveImageProvider.notifier)
+        .calculateRoute(
+          ref,
+          startNodeId: startNode.id,
+          targetElementId: targetElement.id,
+        );
 
-    if (routeNodes.isEmpty) {
-      ref.read(activeRouteProvider.notifier).clearActiveRouteNodes();
+    if (!ok) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('ルートが見つかりません。')));
-    } else {
-      ref.read(activeRouteProvider.notifier).setActiveRouteNodes(routeNodes);
     }
 
-    _focusEntrance(startNode);
+    await _focusEntrance(startNode);
   }
 
   @override
   void onTapDetected(Offset position) {
-    if (ref.read(activeRouteProvider).isNotEmpty) {
-      return;
-    }
-    setState(() {
-      tapPosition = position;
-      selectedElement = null;
-    });
+    ref.read(interactiveImageProvider.notifier).handleTapFinder(position, ref);
   }
 
   @override
   void syncToBuilding(BuildingSnapshot snapshot, {CachedSData? focusElement}) {
-    super.syncToBuilding(snapshot, focusElement: focusElement);
-    if (_selectedRoomInfo == null) return;
-    final selectedStillExists =
-        _findElementById(snapshot, _selectedRoomInfo!.room.id) != null;
-    final hasMismatch =
-        snapshot.id != _selectedRoomInfo!.buildingId || !selectedStillExists;
-    if (hasMismatch) {
-      setState(() {
-        _isSearchMode = true;
-        _selectedRoomInfo = null;
-        _currentBuildingRoomId = null;
-      });
-    }
+    ref
+        .read(interactiveImageProvider.notifier)
+        .syncToBuilding(ref, focusElement: focusElement);
   }
 
   @override
   Widget build(BuildContext context) {
     final repo = ref.watch(buildingRepositoryProvider);
+    final imageState = ref.watch(interactiveImageProvider);
     final isLoading = repo.isLoading;
 
     final allRooms = ref.watch(buildingRoomInfosProvider);
     final activeBuilding = ref.watch(activeBuildingProvider);
-    if (_needsNavigationOnBuild) {
-      _needsNavigationOnBuild = false;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
 
-        final currentActiveBuilding = ref.read(activeBuildingProvider);
-        final selectedRoom = _findElementById(
-          currentActiveBuilding,
-          _selectedRoomInfo!.room.id,
-        );
+    if (!isLoading && pageController.hasClients) {
+      final correctPageIndex =
+          activeBuilding.floorCount - imageState.currentFloor;
 
-        if (selectedRoom == null) {
-          _returnToSearch();
-          return;
-        }
-
-        syncToBuilding(currentActiveBuilding, focusElement: selectedRoom);
-
-        _startNavigation();
-      });
+      if (pageController.page!.round() != correctPageIndex) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && pageController.hasClients) {
+            if (pageController.page!.round() != correctPageIndex) {
+              pageController.jumpToPage(correctPageIndex);
+            }
+          }
+        });
+      }
     }
 
-    final shouldShowSearch = _isSearchMode || _selectedRoomInfo == null;
+    final shouldShowSearch =
+        imageState.isSearchMode || imageState.selectedRoomInfo == null;
 
     final content = shouldShowSearch
         ? FinderSearchContent(
@@ -285,10 +260,9 @@ class _FinderViewState extends ConsumerState<FinderView>
             results: _filterRooms(
               _sortedRooms(List<BuildingRoomInfo>.from(allRooms)),
             ),
-            onQueryChanged: (_) => setState(() {}),
+            onQueryChanged: (_) {},
             onClearQuery: () {
               _searchController.clear();
-              setState(() {});
             },
             onRoomTap: (info) => _activateRoom(
               ref.read(activeBuildingProvider.notifier),
@@ -301,28 +275,29 @@ class _FinderViewState extends ConsumerState<FinderView>
                 .where((info) => info.buildingId == activeBuilding.id)
                 .toList();
             final hasValue = inSameBuilding.any(
-              (info) => info.room.id == _currentBuildingRoomId,
+              (info) => info.room.id == imageState.currentBuildingRoomId,
             );
-            final dropdownValue = hasValue ? _currentBuildingRoomId : null;
+            final dropdownValue = hasValue
+                ? imageState.currentBuildingRoomId
+                : null;
 
             return FinderDetailContent(
-              currentFloor: currentFloor,
+              currentFloor: imageState.currentFloor,
               dropdownValue: dropdownValue,
               roomsInBuilding: inSameBuilding,
-              selectedRoomInfo: _selectedRoomInfo,
-              onRoomSelected: (value) {
+              selectedRoomInfo: imageState.selectedRoomInfo,
+              onRoomSelected: (value) async {
                 if (value == null || inSameBuilding.isEmpty) return;
                 final match = inSameBuilding.firstWhere(
                   (info) => info.room.id == value,
-                  orElse: () => _selectedRoomInfo!,
+                  orElse: () => imageState.selectedRoomInfo!,
                 );
                 _activateRoom(ref.read(activeBuildingProvider.notifier), match);
+                await _focusEntrance(match.room);
               },
               onReturnToSearch: _returnToSearch,
               interactiveImage: buildInteractiveImage(),
-              selectedElementLabel: _selectedElementLabel(
-                activeBuilding,
-              ),
+              selectedElementLabel: _selectedElementLabel(activeBuilding),
               onStartNavigation: isLoading ? null : _startNavigation,
             );
           }();
@@ -352,8 +327,9 @@ class _FinderViewState extends ConsumerState<FinderView>
     if (target != null) {
       return target.name.isNotEmpty ? target.name : target.id;
     }
-    if (_selectedRoomInfo != null) {
-      final r = _selectedRoomInfo!.room;
+    final info = ref.read(interactiveImageProvider).selectedRoomInfo;
+    if (info != null) {
+      final r = info.room;
       return r.name.isNotEmpty ? r.name : r.id;
     }
     return '-';

@@ -91,14 +91,16 @@ class _FloorPageView extends ConsumerWidget {
       pushElevatorLink(second, first);
     }
 
+    final imageState = ref.watch(interactiveImageProvider);
+
     Edge? previewEdge;
-    if (self.isConnecting &&
-        self.connectingStart != null &&
-        self.previewPosition != null &&
-        self.connectingStart!.floor == floor) {
+    if (imageState.isConnecting &&
+        imageState.connectingStart != null &&
+        imageState.previewPosition != null &&
+        imageState.connectingStart!.floor == floor) {
       previewEdge = Edge(
-        start: self.connectingStart!.position,
-        end: self.previewPosition!,
+        start: imageState.connectingStart!.position,
+        end: imageState.previewPosition!,
       );
     }
 

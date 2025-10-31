@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
 class TolerantPageScrollPhysics extends PageScrollPhysics {
@@ -8,8 +9,8 @@ class TolerantPageScrollPhysics extends PageScrollPhysics {
   const TolerantPageScrollPhysics({
     required this.canScroll,
     this.directionTolerance = pi / 6,
-    ScrollPhysics? parent,
-  }) : super(parent: parent);
+    super.parent,
+  });
 
   @override
   bool shouldAcceptUserOffset(ScrollMetrics position) =>
@@ -33,4 +34,12 @@ class TolerantPageScrollPhysics extends PageScrollPhysics {
   @override
   bool get allowImplicitScrolling =>
       canScroll() && super.allowImplicitScrolling;
+}
+
+class CustomScrollBehavior extends MaterialScrollBehavior {
+  @override
+  Set<PointerDeviceKind> get dragDevices => {
+    PointerDeviceKind.touch,
+    PointerDeviceKind.mouse,
+  };
 }

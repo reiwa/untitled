@@ -1,14 +1,5 @@
 part of 'room_finder_viewer.dart';
 
-void handleTapDetectedLogic<T extends CustomView>(
-  InteractiveImageMixin<T> host,
-  Offset position,
-) {
-  host.setState(() {
-    host.selectedElement = null;
-  });
-}
-
 void updateEditorControllersPosition<T extends CustomView>(
   InteractiveImageMixin<T> host,
   Offset position,
@@ -23,31 +14,24 @@ void handleMarkerTapLogic<T extends CustomView>(
   InteractiveImageMixin<T> host,
   CachedSData sData,
   bool isSelected,
+  WidgetRef ref,
 ) {
-  if (host.isConnecting) {
-    handleTapDetectedLogic(host, sData.position);
-    return;
-  }
-  final newSelected = isSelected ? null : sData;
-  host.setState(() {
-    host.selectedElement = newSelected;
+  ref.read(interactiveImageProvider.notifier).handleMarkerTap(sData, isSelected);
+
+  final imgState = ref.read(interactiveImageProvider);
+  final newSelected = imgState.selectedElement;
+
+  if (host is EditorControllerHost) {
+    final editor = host as EditorControllerHost;
     if (newSelected != null) {
-      host.tapPosition = newSelected.position;
-      if (host is EditorControllerHost) {
-        final editor = host as EditorControllerHost;
-        editor.nameController.text = newSelected.name;
-      }
+      editor.nameController.text = newSelected.name;
       updateEditorControllersPosition(host, newSelected.position);
     } else {
-      host.tapPosition = null;
-      if (host is EditorControllerHost) {
-        final editor = host as EditorControllerHost;
-        editor.nameController.clear();
-        editor.xController.clear();
-        editor.yController.clear();
-      }
+      editor.nameController.clear();
+      editor.xController.clear();
+      editor.yController.clear();
     }
-  });
+  }
 }
 
 void handleMarkerDragEndLogic<T extends CustomView>(
@@ -56,18 +40,11 @@ void handleMarkerDragEndLogic<T extends CustomView>(
   bool isSelected,
   WidgetRef ref,
 ) {
-  if (!isSelected || host.selectedElement == null) {
-    host.setState(() {
-      host.isDragging = false;
-    });
-    return;
-  }
-  final updatedData = host.selectedElement!.copyWith(position: position);
-  host.setState(() {
-    host.isDragging = false;
-    host.selectedElement = updatedData;
-    host.tapPosition = position;
-  });
+  ref.read(interactiveImageProvider.notifier).handleMarkerDragEnd(
+        position,
+        isSelected,
+        ref,
+      );
+
   updateEditorControllersPosition(host, position);
-  ref.read(activeBuildingProvider.notifier).updateSData(updatedData);
 }
