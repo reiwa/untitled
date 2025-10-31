@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:test_project/models/element_data_models.dart';
 import 'package:test_project/room_editor/room_finder_app_editor.dart';
 import 'package:test_project/models/room_finder_models.dart';
+import 'package:test_project/utility/platform_utils.dart';
+import 'package:test_project/viewer/interactive_image_state.dart';
 import 'package:test_project/viewer/interactive_screen.dart';
 import 'passage_painter.dart';
 import 'scroll_physics.dart';
@@ -21,18 +23,6 @@ abstract class CustomView extends ConsumerStatefulWidget {
 }
 
 mixin InteractiveImageMixin<T extends CustomView> on ConsumerState<T> {
-  Offset? tapPosition;
-  CachedSData? selectedElement;
-
-  bool isDragging = false;
-  bool isConnecting = false;
-  CachedSData? connectingStart;
-  Offset? previewPosition;
-
-  String? activeBuildingId;
-
-  int _currentFloor = 1;
-  int get currentFloor => _currentFloor;
   late PageController pageController;
 
   bool isPageScrollable = true;
@@ -42,16 +32,19 @@ mixin InteractiveImageMixin<T extends CustomView> on ConsumerState<T> {
   @protected
   bool get showTapDot => widget.mode == CustomViewMode.editor;
 
-  CachedSData? _pendingFocusElement;
-  bool _suppressClearOnPageChange = false;
-
-  bool get canSwipeFloors {
+  bool canSwipeFloorsFor(InteractiveImageState s) {
     final scale = transformationController.value.getMaxScaleOnAxis();
     final canSwipeWhileConnectingElevator =
-        isConnecting && (connectingStart?.type == PlaceType.elevator);
-    return !isDragging &&
-        (!isConnecting || canSwipeWhileConnectingElevator) &&
+        s.isConnecting && (s.connectingStart?.type == PlaceType.elevator);
+    return isDesktopOrElse &&
+        !s.isDragging &&
+        (!s.isConnecting || canSwipeWhileConnectingElevator) &&
         scale <= 1.05;
+  }
+
+  bool get canSwipeFloors {
+    final s = ref.read(interactiveImageProvider);
+    return canSwipeFloorsFor(s);
   }
 
   PlaceType currentType = PlaceType.room;
@@ -67,11 +60,9 @@ mixin InteractiveImageMixin<T extends CustomView> on ConsumerState<T> {
     super.dispose();
   }
 
-  void _handlePageChanged(int pageIndex) =>
-      handlePageChangedLogic(this, pageIndex, ref);
-
-  void onTapDetected(Offset position) =>
-      handleTapDetectedLogic(this, position);
+  void _handlePageChanged(int pageIndex) {
+    ref.read(interactiveImageProvider.notifier).handlePageChanged(pageIndex, ref);
+  }
 
   void _ensureActiveBuildingSynced() =>
       ensureActiveBuildingSyncedLogic(this, ref);
@@ -80,25 +71,21 @@ mixin InteractiveImageMixin<T extends CustomView> on ConsumerState<T> {
       syncToBuildingLogic(this, ref, focusElement: focusElement);
 
   void handleMarkerTap(CachedSData sData, bool isSelected) =>
-      handleMarkerTapLogic(this, sData, isSelected);
+      handleMarkerTapLogic(this, sData, isSelected, ref);
 
   void handleMarkerDragEnd(Offset position, bool isSelected) =>
       handleMarkerDragEndLogic(this, position, isSelected, ref);
 
-  ScrollPhysics _pagePhysics = const NeverScrollableScrollPhysics();
-
-  @override
-  void initState() {
-    super.initState();
-    _pagePhysics = TolerantPageScrollPhysics(
-      canScroll: () => true,
-      directionTolerance: pi / 6,
-    );
-  }
-
   bool _pendingContainerSync = false;
 
   Widget buildInteractiveImage() {
+    final bool canSwipe = canSwipeFloors;
+    final ScrollPhysics pagePhysics = canSwipe
+        ? TolerantPageScrollPhysics(
+            canScroll: () => true,
+            directionTolerance: pi / 6,
+          )
+        : const NeverScrollableScrollPhysics();
     return Expanded(
       child: Container(
         decoration: BoxDecoration(
@@ -111,29 +98,27 @@ mixin InteractiveImageMixin<T extends CustomView> on ConsumerState<T> {
         clipBehavior: Clip.hardEdge,
         child: Listener(
           child: Builder(
-          builder: (context) {
-            final snap = ref.watch(activeBuildingProvider);
-            _ensureActiveBuildingSynced();
+            builder: (context) {
+              final snap = ref.watch(activeBuildingProvider);
+              _ensureActiveBuildingSynced();
 
-            return Listener(
-              child: PageView.builder(
-                controller: pageController,
-                scrollDirection: Axis.vertical,
-                physics: _pagePhysics,
-                itemCount: snap.floorCount,
-                onPageChanged: _handlePageChanged,
-                itemBuilder: (context, pageIndex) {
-                  final int floor = snap.floorCount - pageIndex;
+              return Listener(
+                child: PageView.builder(
+                  controller: pageController,
+                  scrollBehavior: CustomScrollBehavior(),
+                  scrollDirection: Axis.vertical,
+                  physics: pagePhysics,
+                  itemCount: snap.floorCount,
+                  onPageChanged: _handlePageChanged,
+                  itemBuilder: (context, pageIndex) {
+                    final int floor = snap.floorCount - pageIndex;
 
-                  return _FloorPageView(
-                    self: this,
-                    floor: floor,
-                  );
-                },
-              ),
-            );
-          },
-        ),
+                    return _FloorPageView(self: this, floor: floor);
+                  },
+                ),
+              );
+            },
+          ),
         ),
       ),
     );

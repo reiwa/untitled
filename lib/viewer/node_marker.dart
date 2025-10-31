@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:test_project/models/element_data_models.dart';
+import 'package:test_project/viewer/interactive_image_state.dart';
 import 'package:test_project/viewer/room_finder_viewer.dart';
 
 class NodeMarker extends StatefulWidget {
@@ -111,9 +113,12 @@ List<Widget> buildNodeMarkers({
   required double pointerSize,
   required List<CachedSData> relevantElements,
   required Set<String> routeNodeIds,
+  required WidgetRef ref,
 }) {
   return relevantElements.map((sData) {
-    final isSelected = self.selectedElement?.id == sData.id;
+    final imageState = ref.watch(interactiveImageProvider);
+    final notifier = ref.read(interactiveImageProvider.notifier);
+    final isSelected = imageState.selectedElement?.id == sData.id;
     final baseColor = sData.type.color;
     final color =
         routeNodeIds.isNotEmpty &&
@@ -124,18 +129,18 @@ List<Widget> buildNodeMarkers({
 
     return NodeMarker(
       key: ValueKey('${floor}_${sData.id}'),
-      data: isSelected && self.selectedElement != null
-          ? self.selectedElement!
+      data: isSelected && imageState.selectedElement != null
+          ? imageState.selectedElement!
           : sData,
       isSelected: isSelected,
       pointerSize: pointerSize,
       color: color,
       enableDrag: self.enableElementDrag,
-      isConnecting: self.isConnecting,
+      isConnecting: imageState.isConnecting,
       onTap: () => self.handleMarkerTap(sData, isSelected),
       onDragStart: () {
-        if (!self.isDragging) {
-          self.setState(() => self.isDragging = true);
+        if (!imageState.isDragging) {
+          notifier.setDragging(true);
         }
       },
       onDragUpdate: (_) {},
