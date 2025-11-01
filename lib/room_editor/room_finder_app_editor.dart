@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:test_project/models/active_building_notifier.dart';
 import 'package:test_project/models/element_data_models.dart';
 import 'package:test_project/viewer/interactive_image_state.dart';
 import 'package:test_project/models/room_finder_models.dart';
@@ -40,24 +40,104 @@ class _EditorViewState extends ConsumerState<EditorView>
   @override
   TextEditingController get yController => _yController;
 
-  void _prepareEditorDraft() {
-    ref.read(activeBuildingProvider.notifier).startDraftFromActive();
+  Future<void> _handleUploadPressed() async {
+    if (!mounted) return;
+
+    final activeSnapshot = ref.read(activeBuildingProvider);
+    final notifier = ref.read(activeBuildingProvider.notifier);
+    final sourceId = notifier.sourceBuildingId ?? activeSnapshot.id;
+
+    final isNew =
+        ref.read(buildingRepositoryProvider).asData?.value[sourceId] == null;
+
+    final String message = isNew
+        ? '「${activeSnapshot.name}」を新しい建物としてサーバーに保存します。\nよろしいですか？'
+        : '既存の建物データ（ID: $sourceId）を「${activeSnapshot.name}」として上書き保存します。\nよろしいですか？';
+
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('アップロード確認'),
+          content: Text(message),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('キャンセル'),
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+            ),
+            TextButton(
+              style: TextButton.styleFrom(
+                foregroundColor: Theme.of(context).colorScheme.primary,
+              ),
+              child: const Text('保存する!'),
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.hideCurrentSnackBar();
+    messenger.showSnackBar(
+      const SnackBar(
+        content: Text('アップロード中...'),
+        duration: Duration(seconds: 15),
+      ),
+    );
+
+    try {
+      final uploadedId = await notifier.uploadDraftToFirestore();
+
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('アップロードが完了しました (ID: $uploadedId)'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('アップロード中にエラーが発生しました: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _ensureDraftIsActive({bool checkAgain = true}) {
+    if (!mounted) return;
+
+    final currentSnapshot = ref.read(activeBuildingProvider);
+    if (currentSnapshot.id != kDraftBuildingId) {
+
+      if (checkAgain) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted &&
+              ref.read(activeBuildingProvider).id != kDraftBuildingId) {
+            ref.read(activeBuildingProvider.notifier).startDraftFromActive();
+          }
+        });
+      } else {
+        ref.read(activeBuildingProvider.notifier).startDraftFromActive();
+      }
+    }
   }
 
   @override
   void initState() {
     super.initState();
 
-    final snap = ref.read(activeBuildingProvider);
-    final imageState = ref.read(interactiveImageProvider);
-    pageController = PageController(
-      initialPage: snap.floorCount - imageState.currentFloor,
-    );
+    pageController = PageController();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _prepareEditorDraft();
-      }
+      _ensureDraftIsActive(checkAgain: false);
 
       final snap = ref.read(activeBuildingProvider);
       final notifier = ref.read(interactiveImageProvider.notifier);
@@ -244,8 +324,14 @@ class _EditorViewState extends ConsumerState<EditorView>
 
   @override
   Widget build(BuildContext context) {
+    final activeSnapshot = ref.watch(activeBuildingProvider);
+    if (activeSnapshot.id != kDraftBuildingId) {
+      _ensureDraftIsActive(checkAgain: true);
+
+      return const Center(child: CircularProgressIndicator());
+    }
+
     final imageState = ref.watch(interactiveImageProvider);
-    ref.watch(activeBuildingProvider);
     final displaySText = ref
         .read(activeBuildingProvider.notifier)
         .buildSnapshot();
@@ -280,14 +366,7 @@ class _EditorViewState extends ConsumerState<EditorView>
         SnapshotScreen(
           displaySText: displaySText,
           onSettingsPressed: _openSettingsDialog,
-          onCopyPressed: () async {
-            await Clipboard.setData(ClipboardData(text: displaySText));
-            if (mounted) {
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(const SnackBar(content: Text('コピーしました')));
-            }
-          },
+          onUploadPressed: _handleUploadPressed,
         ),
       ],
     );
