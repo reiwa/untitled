@@ -284,13 +284,10 @@ class ActiveBuildingNotifier extends Notifier<BuildingSnapshot> {
       return draftSnapshot.id;
     }
 
-    final String uploadId =
-        (_sourceBuildingId == null || _sourceBuildingId == kDraftBuildingId)
-        ? _firestore
-              .collection('buildings')
-              .doc()
-              .id
-        : _sourceBuildingId!;
+    final String uploadId = switch (_sourceBuildingId) {
+      null || kDraftBuildingId => _firestore.collection('buildings').doc().id,
+      final id => id,
+    };
 
     final snapshotToUpload = draftSnapshot.copyWith(id: uploadId);
 
