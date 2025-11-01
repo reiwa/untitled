@@ -257,7 +257,7 @@ class ActiveBuildingNotifier extends Notifier<BuildingSnapshot> {
       name: sourceSnapshot.name,
       floorCount: sourceSnapshot.floorCount,
       imagePattern: sourceSnapshot.imagePattern,
-      elements: [for (final e in sourceSnapshot.elements) e.copyWith()],
+      elements: [for (final e in sourceSnapshot.elements) e],
       passages:
           [
             for (final p in sourceSnapshot.passages)
