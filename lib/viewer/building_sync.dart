@@ -25,8 +25,11 @@ void handlePageChangedLogic<T extends CustomView>(
     notifier.applyPendingFocusIfAny();
 
     final current = ref.read(interactiveImageProvider);
+    final transformationController = ref
+        .read(interactiveImageProvider.notifier)
+        .transformationController;
     if (current.pendingFocusElement != null) {
-      host.transformationController.value = Matrix4.identity();
+      transformationController.value = Matrix4.identity();
     }
   });
 }
@@ -98,7 +101,10 @@ void syncToBuildingLogic<T extends CustomView>(
       }
     });
   } else {
-    host.transformationController.value = Matrix4.identity();
+    final transformationController = ref
+        .read(interactiveImageProvider.notifier)
+        .transformationController;
+    transformationController.value = Matrix4.identity();
   }
 }
 
@@ -106,11 +112,15 @@ void applyPendingFocusIfAnyLogic<T extends CustomView>(
   InteractiveImageMixin<T> host,
   WidgetRef ref,
 ) {
-  final hadPending = ref.read(interactiveImageProvider).pendingFocusElement != null;
+  final hadPending =
+      ref.read(interactiveImageProvider).pendingFocusElement != null;
 
   ref.read(interactiveImageProvider.notifier).applyPendingFocusIfAny();
 
   if (hadPending) {
-    host.transformationController.value = Matrix4.identity();
+    final transformationController = ref
+        .read(interactiveImageProvider.notifier)
+        .transformationController;
+    transformationController.value = Matrix4.identity();
   }
 }

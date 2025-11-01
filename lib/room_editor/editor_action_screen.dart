@@ -56,8 +56,8 @@ class EditorActionScreen extends StatelessWidget {
                   if (element == null && !isConnecting)
                     Expanded(
                       child: ElevatedButton(
-                        child: const Text('追加する!'),
                         onPressed: onAdd,
+                        child: const Text('追加する!'),
                       ),
                     ),
                   if (element != null) ...[
@@ -77,8 +77,8 @@ class EditorActionScreen extends StatelessWidget {
                       const SizedBox(width: 8),
                       Expanded(
                         child: ElevatedButton(
-                          child: const Text('接続する!'),
                           onPressed: onToggleConnect,
+                          child: const Text('接続する!'),
                         ),
                       ),
                     ],
@@ -86,8 +86,8 @@ class EditorActionScreen extends StatelessWidget {
                   if (isConnecting)
                     Expanded(
                       child: ElevatedButton(
-                        child: const Text('接続しない!'),
                         onPressed: onToggleConnect,
+                        child: const Text('接続しない!'),
                       ),
                     ),
                 ],

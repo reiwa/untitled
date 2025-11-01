@@ -25,11 +25,7 @@ class _FinderViewState extends ConsumerState<FinderView>
   void initState() {
     super.initState();
 
-    final active = ref.read(activeBuildingProvider);
-    final imageState = ref.read(interactiveImageProvider);
-    pageController = PageController(
-      initialPage: active.floorCount - imageState.currentFloor,
-    );
+    pageController = PageController();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -43,7 +39,10 @@ class _FinderViewState extends ConsumerState<FinderView>
 
       notifier.handleBuildingChanged(active.id);
 
-      ref.listenManual<InteractiveImageState>(interactiveImageProvider, (prev, next) {
+      ref.listenManual<InteractiveImageState>(interactiveImageProvider, (
+        prev,
+        next,
+      ) {
         if (!mounted) return;
         if (next.needsNavigationOnBuild) {
           ref
@@ -67,7 +66,9 @@ class _FinderViewState extends ConsumerState<FinderView>
                 .applyPendingFocusIfAny();
 
             if (next.pendingFocusElement != null) {
-              transformationController.value = Matrix4.identity();
+              ref
+                  .read(interactiveImageProvider.notifier)
+                  .updateCurrentZoomScale();
             }
           });
         }
@@ -128,20 +129,17 @@ class _FinderViewState extends ConsumerState<FinderView>
         .resolveNavigationTarget(ref);
   }
 
-  CachedSData? _findElementById(BuildingSnapshot snapshot, String id) {
-    for (final e in snapshot.elements) {
-      if (e.id == id) return e;
-    }
-    return null;
-  }
-
   Future<void> _focusEntrance(CachedSData entrance) async {
     final pageIndex = ref
         .read(interactiveImageProvider.notifier)
         .syncToBuilding(ref, focusElement: entrance);
     if (pageIndex != null) {
       if (pageController.hasClients) {
-        pageController.jumpToPage(pageIndex);
+        pageController.animateToPage(
+          pageIndex,
+          duration: const Duration(milliseconds: 500),
+          curve: Curves.decelerate,
+        );
       }
     }
   }
@@ -187,6 +185,7 @@ class _FinderViewState extends ConsumerState<FinderView>
     } else {
       final initial = entrances.first;
       await _focusEntrance(initial);
+      if (!context.mounted) return;
       startNode = await showEntranceSelector(
         context: context,
         entrances: entrances,
@@ -213,7 +212,6 @@ class _FinderViewState extends ConsumerState<FinderView>
     await _focusEntrance(startNode);
   }
 
-  @override
   void onTapDetected(Offset position) {
     ref.read(interactiveImageProvider.notifier).handleTapFinder(position, ref);
   }
@@ -242,7 +240,11 @@ class _FinderViewState extends ConsumerState<FinderView>
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted && pageController.hasClients) {
             if (pageController.page!.round() != correctPageIndex) {
-              pageController.jumpToPage(correctPageIndex);
+              pageController.animateToPage(
+                correctPageIndex,
+                duration: const Duration(milliseconds: 500),
+                curve: Curves.decelerate,
+              );
             }
           }
         });
@@ -264,11 +266,16 @@ class _FinderViewState extends ConsumerState<FinderView>
             onClearQuery: () {
               _searchController.clear();
             },
-            onRoomTap: (info) => _activateRoom(
-              ref.read(activeBuildingProvider.notifier),
-              info,
-              switchToDetail: true,
-            ),
+            onRoomTap: (info) {
+              _activateRoom(
+                ref.read(activeBuildingProvider.notifier),
+                info,
+                switchToDetail: true,
+              );
+
+              final active = ref.read(activeBuildingProvider);
+              pageController = PageController(initialPage: active.floorCount-1);
+            },
           )
         : () {
             final inSameBuilding = allRooms
@@ -314,8 +321,8 @@ class _FinderViewState extends ConsumerState<FinderView>
               onPressed: () =>
                   FocusScope.of(context).requestFocus(_searchFocusNode),
               backgroundColor: Colors.green,
-              child: const Icon(Icons.search),
               tooltip: '検索ボックスにフォーカス',
+              child: const Icon(Icons.search),
             ),
           ),
       ],

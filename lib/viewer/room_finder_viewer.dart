@@ -29,10 +29,12 @@ mixin InteractiveImageMixin<T extends CustomView> on ConsumerState<T> {
 
   bool get enableElementDrag => widget.mode == CustomViewMode.editor;
 
-  @protected
   bool get showTapDot => widget.mode == CustomViewMode.editor;
 
   bool canSwipeFloorsFor(InteractiveImageState s) {
+    final transformationController = ref
+        .read(interactiveImageProvider.notifier)
+        .transformationController;
     final scale = transformationController.value.getMaxScaleOnAxis();
     final canSwipeWhileConnectingElevator =
         s.isConnecting && (s.connectingStart?.type == PlaceType.elevator);
@@ -48,14 +50,12 @@ mixin InteractiveImageMixin<T extends CustomView> on ConsumerState<T> {
   }
 
   PlaceType currentType = PlaceType.room;
-  final TransformationController transformationController =
-      TransformationController();
+  
   final double minScale = 0.8;
   final double maxScale = 8.0;
 
   @override
   void dispose() {
-    transformationController.dispose();
     pageController.dispose();
     super.dispose();
   }
@@ -79,6 +79,9 @@ mixin InteractiveImageMixin<T extends CustomView> on ConsumerState<T> {
   bool _pendingContainerSync = false;
 
   Widget buildInteractiveImage() {
+    ref.watch(
+      interactiveImageProvider.select((s) => s.currentZoomScale),
+    );
     final bool canSwipe = canSwipeFloors;
     final ScrollPhysics pagePhysics = canSwipe
         ? TolerantPageScrollPhysics(
