@@ -18,7 +18,7 @@ class ActiveBuildingNotifier extends Notifier<BuildingSnapshot> {
 
   @override
   BuildingSnapshot build() {
-    final repoValue = ref.read(buildingRepositoryProvider).asData?.value ?? {};
+    final repoValue = ref.watch(buildingRepositoryProvider).asData?.value ?? {};
 
 
     BuildingSnapshot? initial;
