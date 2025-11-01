@@ -40,16 +40,6 @@ class _EditorViewState extends ConsumerState<EditorView>
   @override
   TextEditingController get yController => _yController;
 
-  void _updatePhysicsOnZoomChange() {
-    final bool canSwipeNow = canSwipeFloors;
-
-    if (isPageScrollable != canSwipeNow) {
-      setState(() {
-        isPageScrollable = canSwipeNow;
-      });
-    }
-  }
-
   void _prepareEditorDraft() {
     ref.read(activeBuildingProvider.notifier).startDraftFromActive();
   }
@@ -81,7 +71,6 @@ class _EditorViewState extends ConsumerState<EditorView>
       _nameController.addListener(_updateNameFromTextField);
 
       isPageScrollable = canSwipeFloors;
-      transformationController.addListener(_updatePhysicsOnZoomChange);
 
       ref.listenManual<InteractiveImageState>(interactiveImageProvider, (prev, next) {
         if (!mounted) return;
@@ -120,7 +109,7 @@ class _EditorViewState extends ConsumerState<EditorView>
                 .applyPendingFocusIfAny();
 
             if (next.pendingFocusElement != null) {
-              transformationController.value = Matrix4.identity();
+              ref.read(interactiveImageProvider.notifier).updateCurrentZoomScale();
             }
           });
         }
@@ -133,8 +122,6 @@ class _EditorViewState extends ConsumerState<EditorView>
     _xController.removeListener(_updateTapPositionFromTextFields);
     _yController.removeListener(_updateTapPositionFromTextFields);
     _nameController.removeListener(_updateNameFromTextField);
-
-    transformationController.removeListener(_updatePhysicsOnZoomChange);
 
     _nameController.dispose();
     _xController.dispose();
@@ -156,11 +143,6 @@ class _EditorViewState extends ConsumerState<EditorView>
     ref
         .read(interactiveImageProvider.notifier)
         .updateElementPosition(Offset(x, y), ref);
-  }
-
-  @override
-  void onTapDetected(Offset position) {
-    ref.read(interactiveImageProvider.notifier).handleTapEditor(position, ref);
   }
 
   void _toggleConnectionMode() {
@@ -208,7 +190,7 @@ class _EditorViewState extends ConsumerState<EditorView>
     final double? y = double.tryParse(_yController.text);
 
     if (name.isEmpty || x == null || y == null) {
-      print("入力エラー: 名前、X、Yを正しく入力してください。");
+      debugPrint("入力エラー: 名前、X、Yを正しく入力してください。");
       return;
     }
 
@@ -263,7 +245,7 @@ class _EditorViewState extends ConsumerState<EditorView>
   @override
   Widget build(BuildContext context) {
     final imageState = ref.watch(interactiveImageProvider);
-    final building = ref.watch(activeBuildingProvider);
+    ref.watch(activeBuildingProvider);
     final displaySText = ref
         .read(activeBuildingProvider.notifier)
         .buildSnapshot();

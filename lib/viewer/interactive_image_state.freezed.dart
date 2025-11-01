@@ -27,6 +27,7 @@ mixin _$InteractiveImageState {
   Offset? get previewPosition => throw _privateConstructorUsedError;
   String? get activeBuildingId => throw _privateConstructorUsedError;
   int get currentFloor => throw _privateConstructorUsedError;
+  double get currentZoomScale => throw _privateConstructorUsedError;
   PlaceType get currentType => throw _privateConstructorUsedError;
   CachedSData? get pendingFocusElement => throw _privateConstructorUsedError;
   bool get suppressClearOnPageChange => throw _privateConstructorUsedError;
@@ -58,6 +59,7 @@ abstract class $InteractiveImageStateCopyWith<$Res> {
     @NullableOffsetConverter() Offset? previewPosition,
     String? activeBuildingId,
     int currentFloor,
+    double currentZoomScale,
     PlaceType currentType,
     CachedSData? pendingFocusElement,
     bool suppressClearOnPageChange,
@@ -98,6 +100,7 @@ class _$InteractiveImageStateCopyWithImpl<
     Object? previewPosition = freezed,
     Object? activeBuildingId = freezed,
     Object? currentFloor = null,
+    Object? currentZoomScale = null,
     Object? currentType = null,
     Object? pendingFocusElement = freezed,
     Object? suppressClearOnPageChange = null,
@@ -140,6 +143,10 @@ class _$InteractiveImageStateCopyWithImpl<
                 ? _value.currentFloor
                 : currentFloor // ignore: cast_nullable_to_non_nullable
                       as int,
+            currentZoomScale: null == currentZoomScale
+                ? _value.currentZoomScale
+                : currentZoomScale // ignore: cast_nullable_to_non_nullable
+                      as double,
             currentType: null == currentType
                 ? _value.currentType
                 : currentType // ignore: cast_nullable_to_non_nullable
@@ -234,6 +241,7 @@ abstract class _$$InteractiveImageStateImplCopyWith<$Res>
     @NullableOffsetConverter() Offset? previewPosition,
     String? activeBuildingId,
     int currentFloor,
+    double currentZoomScale,
     PlaceType currentType,
     CachedSData? pendingFocusElement,
     bool suppressClearOnPageChange,
@@ -274,6 +282,7 @@ class __$$InteractiveImageStateImplCopyWithImpl<$Res>
     Object? previewPosition = freezed,
     Object? activeBuildingId = freezed,
     Object? currentFloor = null,
+    Object? currentZoomScale = null,
     Object? currentType = null,
     Object? pendingFocusElement = freezed,
     Object? suppressClearOnPageChange = null,
@@ -316,6 +325,10 @@ class __$$InteractiveImageStateImplCopyWithImpl<$Res>
             ? _value.currentFloor
             : currentFloor // ignore: cast_nullable_to_non_nullable
                   as int,
+        currentZoomScale: null == currentZoomScale
+            ? _value.currentZoomScale
+            : currentZoomScale // ignore: cast_nullable_to_non_nullable
+                  as double,
         currentType: null == currentType
             ? _value.currentType
             : currentType // ignore: cast_nullable_to_non_nullable
@@ -361,6 +374,7 @@ class _$InteractiveImageStateImpl implements _InteractiveImageState {
     @NullableOffsetConverter() this.previewPosition,
     this.activeBuildingId,
     this.currentFloor = 1,
+    this.currentZoomScale = 1.0,
     this.currentType = PlaceType.room,
     this.pendingFocusElement,
     this.suppressClearOnPageChange = false,
@@ -393,6 +407,9 @@ class _$InteractiveImageStateImpl implements _InteractiveImageState {
   final int currentFloor;
   @override
   @JsonKey()
+  final double currentZoomScale;
+  @override
+  @JsonKey()
   final PlaceType currentType;
   @override
   final CachedSData? pendingFocusElement;
@@ -412,7 +429,7 @@ class _$InteractiveImageStateImpl implements _InteractiveImageState {
 
   @override
   String toString() {
-    return 'InteractiveImageState(tapPosition: $tapPosition, selectedElement: $selectedElement, isDragging: $isDragging, isConnecting: $isConnecting, connectingStart: $connectingStart, previewPosition: $previewPosition, activeBuildingId: $activeBuildingId, currentFloor: $currentFloor, currentType: $currentType, pendingFocusElement: $pendingFocusElement, suppressClearOnPageChange: $suppressClearOnPageChange, isSearchMode: $isSearchMode, selectedRoomInfo: $selectedRoomInfo, currentBuildingRoomId: $currentBuildingRoomId, needsNavigationOnBuild: $needsNavigationOnBuild)';
+    return 'InteractiveImageState(tapPosition: $tapPosition, selectedElement: $selectedElement, isDragging: $isDragging, isConnecting: $isConnecting, connectingStart: $connectingStart, previewPosition: $previewPosition, activeBuildingId: $activeBuildingId, currentFloor: $currentFloor, currentZoomScale: $currentZoomScale, currentType: $currentType, pendingFocusElement: $pendingFocusElement, suppressClearOnPageChange: $suppressClearOnPageChange, isSearchMode: $isSearchMode, selectedRoomInfo: $selectedRoomInfo, currentBuildingRoomId: $currentBuildingRoomId, needsNavigationOnBuild: $needsNavigationOnBuild)';
   }
 
   @override
@@ -436,6 +453,8 @@ class _$InteractiveImageStateImpl implements _InteractiveImageState {
                 other.activeBuildingId == activeBuildingId) &&
             (identical(other.currentFloor, currentFloor) ||
                 other.currentFloor == currentFloor) &&
+            (identical(other.currentZoomScale, currentZoomScale) ||
+                other.currentZoomScale == currentZoomScale) &&
             (identical(other.currentType, currentType) ||
                 other.currentType == currentType) &&
             (identical(other.pendingFocusElement, pendingFocusElement) ||
@@ -466,6 +485,7 @@ class _$InteractiveImageStateImpl implements _InteractiveImageState {
     previewPosition,
     activeBuildingId,
     currentFloor,
+    currentZoomScale,
     currentType,
     pendingFocusElement,
     suppressClearOnPageChange,
@@ -498,6 +518,7 @@ abstract class _InteractiveImageState implements InteractiveImageState {
     @NullableOffsetConverter() final Offset? previewPosition,
     final String? activeBuildingId,
     final int currentFloor,
+    final double currentZoomScale,
     final PlaceType currentType,
     final CachedSData? pendingFocusElement,
     final bool suppressClearOnPageChange,
@@ -525,6 +546,8 @@ abstract class _InteractiveImageState implements InteractiveImageState {
   String? get activeBuildingId;
   @override
   int get currentFloor;
+  @override
+  double get currentZoomScale;
   @override
   PlaceType get currentType;
   @override

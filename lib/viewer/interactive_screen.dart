@@ -41,74 +41,68 @@ class InteractiveLayer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    var cachedScale = self.transformationController.value.getMaxScaleOnAxis();
-    return Container(
-      child: Stack(
-        children: [
-          IgnorePointer(
-            ignoring: self.canSwipeFloors,
-            child: InteractiveViewer(
-              transformationController: self.transformationController,
-              minScale: self.minScale,
-              maxScale: self.maxScale,
-              panEnabled: true,
-              clipBehavior: Clip.hardEdge,
-              boundaryMargin: const EdgeInsets.all(200),
-              onInteractionStart: (_) {
-                cachedScale = self.transformationController.value
-                    .getMaxScaleOnAxis();
-              },
-              onInteractionEnd: (_) {
-                final controller = self.transformationController;
-                if (controller.value.getMaxScaleOnAxis() <= 1.05 &&
-                    cachedScale - controller.value.getMaxScaleOnAxis() > 0) {
-                  controller.value = Matrix4.identity();
-                }
-              },
-              child: _InteractiveContent(
-                self: self,
-                floor: floor,
-                imagePath: imagePath,
-                viewerSize: viewerSize,
-                relevantElements: relevantElements,
-                routeNodeIds: routeNodeIds,
-                routeVisualSegments: routeVisualSegments,
-                elevatorLinks: elevatorLinks,
-                passageEdges: passageEdges,
-                previewEdge: previewEdge,
-                ref: ref,
-              ),
+    final transformationController = ref
+        .read(interactiveImageProvider.notifier)
+        .transformationController;
+    var cachedScale = transformationController.value.getMaxScaleOnAxis();
+    return Stack(
+      children: [
+        IgnorePointer(
+          ignoring: self.canSwipeFloors,
+          child: InteractiveViewer(
+            transformationController: transformationController,
+            minScale: self.minScale,
+            maxScale: self.maxScale,
+            panEnabled: true,
+            clipBehavior: Clip.hardEdge,
+            boundaryMargin: const EdgeInsets.all(200),
+            onInteractionStart: (_) {
+              cachedScale = transformationController.value
+                  .getMaxScaleOnAxis();
+            },
+            onInteractionEnd: (_) {
+              if (transformationController.value.getMaxScaleOnAxis() <= 1.05 &&
+                  cachedScale - transformationController.value.getMaxScaleOnAxis() > 0) {
+                transformationController.value = Matrix4.identity();
+                ref.read(interactiveImageProvider.notifier).updateCurrentZoomScale();
+              }
+            },
+            child: _InteractiveContent(
+              self: self,
+              floor: floor,
+              imagePath: imagePath,
+              viewerSize: viewerSize,
+              relevantElements: relevantElements,
+              routeNodeIds: routeNodeIds,
+              routeVisualSegments: routeVisualSegments,
+              elevatorLinks: elevatorLinks,
+              passageEdges: passageEdges,
+              previewEdge: previewEdge,
+              ref: ref,
             ),
           ),
-
-          if (isDesktopOrElse)
-            Positioned(
-              right: 10.0,
-              bottom: 10.0,
-              child: IconButton(
-                icon: Icon(
-                  self.transformationController.value.getMaxScaleOnAxis() <= 1.0
-                      ? Icons.zoom_out_map
-                      : Icons.zoom_in_map,
-                ),
-                style: IconButton.styleFrom(
-                  backgroundColor: Colors.white.withValues(alpha: 0.7),
-                  foregroundColor: Colors.black87,
-                ),
-                onPressed: () {
-                  if (self.transformationController.value.getMaxScaleOnAxis() <=
-                      1.0) {
-                    self.transformationController.value = Matrix4.identity()
-                      ..scale(1.1);
-                  } else {
-                    self.transformationController.value = Matrix4.identity();
-                  }
-                  self.setState(() {});
-                },
+        ),
+    
+        if (isDesktopOrElse)
+          Positioned(
+            right: 10.0,
+            bottom: 10.0,
+            child: IconButton(
+              icon: Icon(
+                transformationController.value.getMaxScaleOnAxis() <= 1.05
+                    ? Icons.zoom_out_map
+                    : Icons.zoom_in_map,
               ),
+              style: IconButton.styleFrom(
+                backgroundColor: Colors.white.withValues(alpha: 0.7),
+                foregroundColor: Colors.black87,
+              ),
+              onPressed: () {
+                ref.read(interactiveImageProvider.notifier).toggleZoom();
+              },
             ),
-        ],
-      ),
+          ),
+      ],
     );
   }
 }
@@ -143,6 +137,7 @@ class _InteractiveContent extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final imageState = ref.watch(interactiveImageProvider);
+    final transformationController = ref.read(interactiveImageProvider.notifier).transformationController;
     return Container(
       alignment: Alignment.center,
       child: Stack(
@@ -165,7 +160,7 @@ class _InteractiveContent extends StatelessWidget {
                   edges: passageEdges,
                   previewEdge: previewEdge,
                   connectingType: imageState.connectingStart?.type,
-                  controller: self.transformationController,
+                  controller: transformationController,
                   routeSegments: routeVisualSegments,
                   viewerSize: viewerSize,
                   elevatorLinks: elevatorLinks,
@@ -175,9 +170,9 @@ class _InteractiveContent extends StatelessWidget {
           ),
           Positioned.fill(
             child: AnimatedBuilder(
-              animation: self.transformationController,
+              animation: transformationController,
               builder: (context, child) {
-                final scale = self.transformationController.value
+                final scale = transformationController.value
                     .getMaxScaleOnAxis();
                 final pointerSize = 12 / sqrt(scale);
 

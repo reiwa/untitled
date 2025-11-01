@@ -54,6 +54,8 @@ class InteractiveImageState with _$InteractiveImageState {
 
     @Default(1) int currentFloor,
 
+    @Default(1.0) double currentZoomScale,
+
     @Default(PlaceType.room) PlaceType currentType,
 
     CachedSData? pendingFocusElement,
@@ -68,7 +70,29 @@ class InteractiveImageState with _$InteractiveImageState {
 }
 
 class InteractiveImageNotifier extends StateNotifier<InteractiveImageState> {
+  final TransformationController transformationController =
+      TransformationController();
+
   InteractiveImageNotifier() : super(const InteractiveImageState());
+
+  void toggleZoom() {
+    final isZoomedOut =
+        transformationController.value.getMaxScaleOnAxis() <= 1.0;
+
+    if (isZoomedOut) {
+      transformationController.value = Matrix4.identity()..scaleByDouble(1.1, 1.1, 1.1, 1.0);
+    } else {
+      transformationController.value = Matrix4.identity();
+    }
+
+    updateCurrentZoomScale();
+  }
+
+  void updateCurrentZoomScale() {
+    state = state.copyWith(
+      currentZoomScale: transformationController.value.getMaxScaleOnAxis(),
+    );
+  }
 
   void updatePreviewPosition(Offset? position) {
     state = state.copyWith(previewPosition: position);
@@ -242,7 +266,7 @@ class InteractiveImageNotifier extends StateNotifier<InteractiveImageState> {
       final start = s.connectingStart;
       final canConnect = start != null && tapped != null && canConnectNodes(start, tapped);
       if (canConnect) {
-        ref.read(activeBuildingProvider.notifier).addEdge(start!.id, tapped!.id);
+        ref.read(activeBuildingProvider.notifier).addEdge(start.id, tapped.id);
         state = s.copyWith(
           isConnecting: false,
           connectingStart: null,
@@ -409,6 +433,12 @@ class InteractiveImageNotifier extends StateNotifier<InteractiveImageState> {
       if (e.id == id) return e;
     }
     return null;
+  }
+
+  @override
+  void dispose() {
+    transformationController.dispose();
+    super.dispose();
   }
 }
 

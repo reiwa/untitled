@@ -132,7 +132,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
           child: const Text('キャンセル'),
           onPressed: () => Navigator.pop(context),
         ),
-        ElevatedButton(child: const Text('保存'), onPressed: _saveSettings),
+        ElevatedButton(onPressed: _saveSettings, child: const Text('保存')),
       ],
     );
   }
