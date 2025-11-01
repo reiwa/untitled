@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:test_project/models/active_building_notifier.dart';
+import 'package:test_project/models/building_snapshot.dart';
 import 'package:test_project/models/element_data_models.dart';
 import 'package:test_project/models/room_finder_models.dart';
 import 'package:test_project/viewer/interactive_image_state.dart';
 import 'package:test_project/viewer/room_finder_viewer.dart';
-import 'package:test_project/services/building_data_loader.dart';
 import 'detail_screen.dart';
 import 'entrance_selector.dart';
 import 'search_screen.dart';
@@ -28,10 +29,9 @@ class _FinderViewState extends ConsumerState<FinderView>
     pageController = PageController();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
       final rooms = ref.read(buildingRoomInfosProvider);
       if (rooms.isEmpty) {
-        loadBuildingData(ref);
+        ref.read(buildingRepositoryProvider.notifier).refresh();
       }
 
       final active = ref.read(activeBuildingProvider);
@@ -58,19 +58,15 @@ class _FinderViewState extends ConsumerState<FinderView>
         }
 
         if (prev?.currentFloor != next.currentFloor) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted) return;
+          if (!mounted) return;
 
+          ref.read(interactiveImageProvider.notifier).applyPendingFocusIfAny();
+
+          if (next.pendingFocusElement != null) {
             ref
                 .read(interactiveImageProvider.notifier)
-                .applyPendingFocusIfAny();
-
-            if (next.pendingFocusElement != null) {
-              ref
-                  .read(interactiveImageProvider.notifier)
-                  .updateCurrentZoomScale();
-            }
-          });
+                .updateCurrentZoomScale();
+          }
         }
       });
     });
@@ -274,7 +270,9 @@ class _FinderViewState extends ConsumerState<FinderView>
               );
 
               final active = ref.read(activeBuildingProvider);
-              pageController = PageController(initialPage: active.floorCount-1);
+              pageController = PageController(
+                initialPage: active.floorCount - 1,
+              );
             },
           )
         : () {

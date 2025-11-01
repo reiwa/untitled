@@ -90,3 +90,14 @@ class RouteVisualSegment {
   final Offset start;
   final Offset end;
 }
+
+extension CachedSDataFirestore on CachedSData {
+  Map<String, dynamic> toJson() {
+    return {
+      'name': name,
+      'position': {'x': position.dx, 'y': position.dy},
+      'floor': floor,
+      'type': type.name,
+    };
+  }
+}

@@ -3,13 +3,13 @@ import 'package:flutter/material.dart';
 class SnapshotScreen extends StatelessWidget {
   final String displaySText;
   final VoidCallback onSettingsPressed;
-  final Future<void> Function() onCopyPressed;
+  final Future<void> Function() onUploadPressed;
 
   const SnapshotScreen({
     super.key,
     required this.displaySText,
     required this.onSettingsPressed,
-    required this.onCopyPressed,
+    required this.onUploadPressed,
   });
 
   @override
@@ -47,9 +47,9 @@ class SnapshotScreen extends StatelessWidget {
                       onPressed: onSettingsPressed,
                     ),
                     IconButton(
-                      icon: const Icon(Icons.copy),
-                      tooltip: 'コピー',
-                      onPressed: () => onCopyPressed(),
+                      icon: const Icon(Icons.cloud_upload),
+                      tooltip: 'アップロード',
+                      onPressed: () => onUploadPressed(),
                     ),
                   ],
                 ),

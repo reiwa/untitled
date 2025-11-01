@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "387404482815",
+    "project_id": "saidai-roomfinder",
+    "storage_bucket": "saidai-roomfinder.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:387404482815:android:8cece073e4cf36edc664ca",
+        "android_client_info": {
+          "package_name": "com.example.test_project"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB05WUg3AWcJJyAzPVM4EQ84HJd0ke7LAY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
